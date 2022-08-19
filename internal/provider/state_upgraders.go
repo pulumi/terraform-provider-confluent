@@ -88,11 +88,11 @@ func kafkaResourceV0() *schema.Resource {
 // Modifies the attribute(s) appropriately for the migration.
 func kafkaStateUpgradeV0(ctx context.Context, rawState map[string]interface{}, meta interface{}) (map[string]interface{}, error) {
 	// 1. When upgrading from 0.10.0, rename "http_endpoint" to "rest_endpoint" by copying the value and deleting "http_endpoint" attribute
-	if httpEndpoint, found := rawState[paramHttpEndpoint]; found {
-		httpEndpointString := httpEndpoint.(string)
-		rawState[paramRestEndpoint] = httpEndpointString
-		delete(rawState, paramHttpEndpoint)
-	}
+	//if httpEndpoint, found := rawState[paramHttpEndpoint]; found {
+	//	httpEndpointString := httpEndpoint.(string)
+	//	rawState[paramRestEndpoint] = httpEndpointString
+	//	delete(rawState, paramHttpEndpoint)
+	//}
 	// 2. When upgrading from 0.11.0 no changes are necessary: "rest_endpoint" exists already
 
 	return rawState, nil

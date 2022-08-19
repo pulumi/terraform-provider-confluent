@@ -95,6 +95,15 @@ func kafkaTopicResource() *schema.Resource {
 				Description:  "The number of partitions to create in the topic.",
 				ValidateFunc: validation.IntAtLeast(1),
 			},
+			paramHttpEndpoint: {
+				Deprecated:    "This parameter has been deprecated in favour of Rest Endpoint",
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				Description:   "The HTTP endpoint of the Kafka cluster (e.g., `https://pkc-00000.us-central1.gcp.confluent.cloud:443`).",
+				ValidateFunc:  validation.StringMatch(regexp.MustCompile("^http"), "the HTTP endpoint must start with 'https://'"),
+				ConflictsWith: []string{paramRestEndpoint},
+			},
 			paramRestEndpoint: {
 				Type:         schema.TypeString,
 				Optional:     true,
@@ -145,7 +154,12 @@ func extractRestEndpoint(client *Client, d *schema.ResourceData, isImportOperati
 	if restEndpoint != "" {
 		return restEndpoint, nil
 	}
-	return "", fmt.Errorf("one of provider.kafka_rest_endpoint (defaults to KAFKA_REST_ENDPOINT environment variable) or resource.rest_endpoint must be set")
+	httpEndpoint := d.Get(paramHttpEndpoint).(string)
+	if httpEndpoint != "" {
+		return httpEndpoint, nil
+	}
+
+	return "", fmt.Errorf("one of provider.kafka_rest_endpoint (defaults to KAFKA_REST_ENDPOINT environment variable), resource.rest_endpoint or resource.http_endpoint must be set")
 }
 
 func extractClusterApiKeyAndApiSecret(client *Client, d *schema.ResourceData, isImportOperation bool) (string, string, error) {
@@ -257,6 +271,8 @@ func kafkaTopicRead(ctx context.Context, d *schema.ResourceData, meta interface{
 	if err != nil {
 		return diag.Errorf("error reading Kafka Topic: %s", createDescriptiveError(err))
 	}
+	d.Set(paramHttpEndpoint, restEndpoint)
+	d.Set(paramRestEndpoint, restEndpoint)
 	clusterId := extractStringValueFromBlock(d, paramKafkaCluster, paramId)
 	clusterApiKey, clusterApiSecret, err := extractClusterApiKeyAndApiSecret(meta.(*Client), d, false)
 	if err != nil {
@@ -414,6 +430,9 @@ func readTopicAndSetAttributes(ctx context.Context, d *schema.ResourceData, c *K
 			return nil, err
 		}
 		if err := d.Set(paramRestEndpoint, c.restEndpoint); err != nil {
+			return nil, err
+		}
+		if err := d.Set(paramHttpEndpoint, c.restEndpoint); err != nil {
 			return nil, err
 		}
 	}
