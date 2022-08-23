@@ -11,7 +11,7 @@ Simplify Apache Kafka Terraform deployment with the Confluent Terraform Provider
 
 Use the Confluent provider to deploy and manage [Confluent Cloud](https://www.confluent.io/confluent-cloud/) infrastructure. You must provide appropriate credentials to use the provider. The navigation menu provides details about the resources that you can interact with (_Resources_), and a guide (_Guides_) for how you can get started.
 
-[![asciicast](https://asciinema.org/a/513545.svg)](https://asciinema.org/a/513545)
+[![asciicast](https://asciinema.org/a/515747.svg)](https://asciinema.org/a/515747)
 
 ## Example Usage
 
@@ -23,7 +23,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.1.0"
+      version = "1.2.0"
     }
   }
 }
@@ -107,3 +107,5 @@ provider "confluent" {
 * [Request Features](mailto:cflt-tf-access@confluent.io?subject=Feature%20Request)
 
 -> **Note:** If you are running into issues when trying to write a reusable module using this provider, please look at [this message](https://github.com/confluentinc/terraform-provider-confluentcloud/issues/20#issuecomment-1011833161) to resolve the problem.
+
+-> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental instance deletion. This setting rejects plans that would destroy or recreate the instance, such as attempting to change uneditable attributes. Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).

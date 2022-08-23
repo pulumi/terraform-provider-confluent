@@ -8,15 +8,21 @@ description: |-
 
 # confluent_environment Resource
 
-<img src="https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8" alt="">
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
 `confluent_environment` provides an Environment resource. The resource lets you create, edit and delete environments on Confluent Cloud.
+
+-> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental Environment deletion. This setting rejects plans that would destroy or recreate the Environment, such as attempting to change uneditable attributes. Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).
 
 ## Example Usage
 
 ```terraform
 resource "confluent_environment" "prod" {
   display_name = "Production"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 ```
 

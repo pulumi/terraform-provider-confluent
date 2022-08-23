@@ -8,16 +8,13 @@ description: |-
 
 # confluent_connector Resource
 
-<img src="https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8" alt="">
-
--> **Note:** `confluent_connector` resource is available in an **Preview Program** for early adopters. Preview features are introduced to gather customer feedback. This feature should be used only for evaluation and non-production testing purposes or to provide feedback to Confluent, particularly as it becomes more widely available in follow-on editions.  
-**Preview Program** features are intended for evaluation use in development and testing environments only, and not for production use. The warranty, SLA, and Support Services provisions of your agreement with Confluent do not apply to Preview Program features. Preview Program features are considered to be a Proof of Concept as defined in the Confluent Cloud Terms of Service. Confluent may discontinue providing preview releases of the Preview Program features at any time in Confluent’s sole discretion.
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
 `confluent_connector` provides a connector resource that enables creating, editing, and deleting connectors on Confluent Cloud.
 
 -> **Note:** Use [Confluent docs](https://docs.confluent.io/cloud/current/connectors/index.html) or the [Confluent Cloud Console](https://docs.confluent.io/cloud/current/connectors/cc-s3-sink.html#using-the-ccloud-console) to pregenerate the configuration for your desired connector and to see what ACLs are required to be created.
 
--> **Note:** Provisioning a connector takes 15 minutes on average. Work is ongoing to decrease connector provisioning time in future releases.
+-> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental connector deletion. This setting rejects plans that would destroy or recreate the connector, such as attempting to change uneditable attributes. Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).
 
 ## Example Usage
 
@@ -50,6 +47,10 @@ resource "confluent_connector" "source" {
     confluent_kafka_acl.app-connector-create-on-data-preview-topics,
     confluent_kafka_acl.app-connector-write-on-data-preview-topics,
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 ```
 
@@ -93,6 +94,10 @@ resource "confluent_connector" "sink" {
     confluent_kafka_acl.app-connector-write-on-error-lcc-topics,
     confluent_kafka_acl.app-connector-read-on-connect-lcc-group,
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 ```
 

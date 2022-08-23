@@ -8,15 +8,21 @@ description: |-
 
 # confluent_kafka_topic Resource
 
-<img src="https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8" alt="">
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
 `confluent_kafka_topic` provides a Kafka Topic resource that enables creating and deleting Kafka Topics on a Kafka cluster on Confluent Cloud.
+
+-> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental topic deletion. This setting rejects plans that would destroy or recreate the topic, such as attempting to change uneditable attributes (for example, `partitions_count`). Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).
 
 ## Example Usage
 
 ```terraform
 resource "confluent_environment" "development" {
   display_name = "Development"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "confluent_kafka_cluster" "basic-cluster" {
@@ -28,6 +34,10 @@ resource "confluent_kafka_cluster" "basic-cluster" {
 
   environment {
     id = confluent_environment.development.id
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -46,6 +56,10 @@ resource "confluent_kafka_topic" "orders" {
   credentials {
     key    = confluent_api_key.app-manager-kafka-api-key.id
     secret = confluent_api_key.app-manager-kafka-api-key.secret
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 ```

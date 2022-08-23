@@ -8,7 +8,7 @@ description: |-
 
 # confluent_kafka_acl Resource
 
-<img src="https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8" alt="">
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
 `confluent_kafka_acl` provides a Kafka ACL resource that enables creating and deleting Kafka ACLs on Confluent Cloud.
 
@@ -17,6 +17,10 @@ description: |-
 ```terraform
 resource "confluent_environment" "development" {
   display_name = "Development"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "confluent_kafka_cluster" "basic-cluster" {
@@ -28,6 +32,10 @@ resource "confluent_kafka_cluster" "basic-cluster" {
 
   environment {
     id = confluent_environment.development.id
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -58,7 +66,7 @@ The following arguments are supported:
 - `kafka_cluster` - (Required Configuration Block) supports the following:
   - `id` - (Required String) The ID of the Kafka cluster, for example, `lkc-abc123`.
 - `resource_type` - (Required String) The type of the resource. Accepted values are: `UNKNOWN`, `ANY`, `TOPIC`, `GROUP`, `CLUSTER`, `TRANSACTIONAL_ID`, `DELEGATION_TOKEN`.
-- `resource_name` - (Required String) The resource name for the ACL.
+- `resource_name` - (Required String) The resource name for the ACL. Must be `kafka-cluster` if `resource_type` equals to `CLUSTER`.
 - `pattern_type` - (Required String) The pattern type for the ACL. Accepted values are: `UNKNOWN`,`ANY`,`MATCH`, `LITERAL`, and `PREFIXED`.
 - `principal` - (Required String) The principal for the ACL.
 - `operation` - (Required String) The operation type for the ACL. Accepted values are: `UNKNOWN`, `ANY`, `ALL`, `READ`, `WRITE`, `CREATE`, `DELETE`, `ALTER`, `DESCRIBE`, `CLUSTER_ACTION`, `DESCRIBE_CONFIGS`, `ALTER_CONFIGS`, and `IDEMPOTENT_WRITE`.
