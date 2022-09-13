@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -271,8 +272,15 @@ func kafkaTopicRead(ctx context.Context, d *schema.ResourceData, meta interface{
 	if err != nil {
 		return diag.Errorf("error reading Kafka Topic: %s", createDescriptiveError(err))
 	}
-	d.Set(paramHttpEndpoint, restEndpoint)
-	d.Set(paramRestEndpoint, restEndpoint)
+	if _, found := os.LookupEnv("KAFKA_REST_ENDPOINT"); !found {
+		d.Set(paramHttpEndpoint, restEndpoint)
+		d.Set(paramRestEndpoint, restEndpoint)
+	} else {
+		// with these values set in state, we get a perpetual diff
+		// when we are using the KAFKA_REST_ENDPOINT
+		d.Set(paramHttpEndpoint, "")
+		d.Set(paramRestEndpoint, "")
+	}
 	clusterId := extractStringValueFromBlock(d, paramKafkaCluster, paramId)
 	clusterApiKey, clusterApiSecret, err := extractClusterApiKeyAndApiSecret(meta.(*Client), d, false)
 	if err != nil {
