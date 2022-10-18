@@ -23,6 +23,7 @@ import (
 	iamv1 "github.com/confluentinc/ccloud-sdk-go-v2/iam/v1"
 	iam "github.com/confluentinc/ccloud-sdk-go-v2/iam/v2"
 	oidc "github.com/confluentinc/ccloud-sdk-go-v2/identity-provider/v2"
+	quotas "github.com/confluentinc/ccloud-sdk-go-v2/kafka-quotas/v1"
 	ksql "github.com/confluentinc/ccloud-sdk-go-v2/ksql/v2"
 	mds "github.com/confluentinc/ccloud-sdk-go-v2/mds/v2"
 	net "github.com/confluentinc/ccloud-sdk-go-v2/networking/v1"
@@ -61,6 +62,7 @@ type Client struct {
 	kafkaRestClientFactory *KafkaRestClientFactory
 	mdsClient              *mds.APIClient
 	oidcClient             *oidc.APIClient
+	quotasClient           *quotas.APIClient
 	userAgent              string
 	cloudApiKey            string
 	cloudApiSecret         string
@@ -83,7 +85,7 @@ func init() {
 	}
 }
 
-func New(version string) func() *schema.Provider {
+func New(version, userAgent string) func() *schema.Provider {
 	return func() *schema.Provider {
 		provider := &schema.Provider{
 			Schema: map[string]*schema.Schema{
@@ -135,6 +137,7 @@ func New(version string) func() *schema.Provider {
 				"confluent_ksql_cluster":        ksqlDataSource(),
 				"confluent_identity_pool":       identityPoolDataSource(),
 				"confluent_identity_provider":   identityProviderDataSource(),
+				"confluent_kafka_client_quota":  kafkaClientQuotaDataSource(),
 				"confluent_network":             networkDataSource(),
 				"confluent_organization":        organizationDataSource(),
 				"confluent_peering":             peeringDataSource(),
@@ -144,25 +147,29 @@ func New(version string) func() *schema.Provider {
 				"confluent_user":                userDataSource(),
 			},
 			ResourcesMap: map[string]*schema.Resource{
-				"confluent_api_key":             apiKeyResource(),
-				"confluent_kafka_cluster":       kafkaResource(),
-				"confluent_environment":         environmentResource(),
-				"confluent_identity_pool":       identityPoolResource(),
-				"confluent_identity_provider":   identityProviderResource(),
-				"confluent_ksql_cluster":        ksqlResource(),
-				"confluent_connector":           connectorResource(),
-				"confluent_service_account":     serviceAccountResource(),
-				"confluent_kafka_topic":         kafkaTopicResource(),
-				"confluent_kafka_acl":           kafkaAclResource(),
-				"confluent_network":             networkResource(),
-				"confluent_peering":             peeringResource(),
-				"confluent_private_link_access": privateLinkAccessResource(),
-				"confluent_role_binding":        roleBindingResource(),
+				"confluent_api_key":              apiKeyResource(),
+				"confluent_cluster_link":         clusterLinkResource(),
+				"confluent_kafka_cluster":        kafkaResource(),
+				"confluent_kafka_cluster_config": kafkaConfigResource(),
+				"confluent_environment":          environmentResource(),
+				"confluent_identity_pool":        identityPoolResource(),
+				"confluent_identity_provider":    identityProviderResource(),
+				"confluent_kafka_client_quota":   kafkaClientQuotaResource(),
+				"confluent_ksql_cluster":         ksqlResource(),
+				"confluent_connector":            connectorResource(),
+				"confluent_service_account":      serviceAccountResource(),
+				"confluent_kafka_topic":          kafkaTopicResource(),
+				"confluent_kafka_mirror_topic":   kafkaMirrorTopicResource(),
+				"confluent_kafka_acl":            kafkaAclResource(),
+				"confluent_network":              networkResource(),
+				"confluent_peering":              peeringResource(),
+				"confluent_private_link_access":  privateLinkAccessResource(),
+				"confluent_role_binding":         roleBindingResource(),
 			},
 		}
 
 		provider.ConfigureContextFunc = func(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
-			return providerConfigure(ctx, d, provider, version)
+			return providerConfigure(ctx, d, provider, version, userAgent)
 		}
 
 		return provider
@@ -210,7 +217,7 @@ func environmentDataSourceSchema() *schema.Schema {
 	}
 }
 
-func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Provider, providerVersion string) (interface{}, diag.Diagnostics) {
+func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Provider, providerVersion, additionalUserAgent string) (interface{}, diag.Diagnostics) {
 	tflog.Info(ctx, "Initializing Terraform Provider for Confluent Cloud")
 	endpoint := d.Get("endpoint").(string)
 	cloudApiKey := d.Get("cloud_api_key").(string)
@@ -228,6 +235,9 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	}
 
 	userAgent := p.UserAgent(terraformProviderUserAgent, fmt.Sprintf("%s (https://confluent.cloud; support@confluent.io)", providerVersion))
+	if additionalUserAgent != "" {
+		userAgent = fmt.Sprintf("%s %s", additionalUserAgent, userAgent)
+	}
 
 	apiKeysCfg := apikeys.NewConfiguration()
 	cmkCfg := cmk.NewConfiguration()
@@ -239,6 +249,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	oidcCfg := oidc.NewConfiguration()
 	orgCfg := org.NewConfiguration()
 	ksqlCfg := ksql.NewConfiguration()
+	quotasCfg := quotas.NewConfiguration()
 
 	apiKeysCfg.Servers[0].URL = endpoint
 	cmkCfg.Servers[0].URL = endpoint
@@ -250,6 +261,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	oidcCfg.Servers[0].URL = endpoint
 	orgCfg.Servers[0].URL = endpoint
 	ksqlCfg.Servers[0].URL = endpoint
+	quotasCfg.Servers[0].URL = endpoint
 
 	apiKeysCfg.UserAgent = userAgent
 	cmkCfg.UserAgent = userAgent
@@ -261,6 +273,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	oidcCfg.UserAgent = userAgent
 	orgCfg.UserAgent = userAgent
 	ksqlCfg.UserAgent = userAgent
+	quotasCfg.UserAgent = userAgent
 
 	apiKeysCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
 	cmkCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
@@ -273,6 +286,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	oidcCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
 	orgCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
 	ksqlCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
+	quotasCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
 
 	// TODO: Delete once APIF-2660 is completed
 	tempConnectClient := createRetryableHttpClientWithExponentialBackoff()
@@ -291,6 +305,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 		ksqlClient:             ksql.NewAPIClient(ksqlCfg),
 		kafkaRestClientFactory: &KafkaRestClientFactory{userAgent: userAgent},
 		mdsClient:              mds.NewAPIClient(mdsCfg),
+		quotasClient:           quotas.NewAPIClient(quotasCfg),
 		userAgent:              userAgent,
 		cloudApiKey:            cloudApiKey,
 		cloudApiSecret:         cloudApiSecret,

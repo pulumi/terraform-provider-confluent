@@ -23,13 +23,16 @@ import (
 	iamv1 "github.com/confluentinc/ccloud-sdk-go-v2/iam/v1"
 	iam "github.com/confluentinc/ccloud-sdk-go-v2/iam/v2"
 	oidc "github.com/confluentinc/ccloud-sdk-go-v2/identity-provider/v2"
+	quotas "github.com/confluentinc/ccloud-sdk-go-v2/kafka-quotas/v1"
 	kafkarestv3 "github.com/confluentinc/ccloud-sdk-go-v2/kafkarest/v3"
 	ksql "github.com/confluentinc/ccloud-sdk-go-v2/ksql/v2"
 	mds "github.com/confluentinc/ccloud-sdk-go-v2/mds/v2"
 	net "github.com/confluentinc/ccloud-sdk-go-v2/networking/v1"
 	org "github.com/confluentinc/ccloud-sdk-go-v2/org/v2"
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"io"
 	"net/http"
@@ -44,6 +47,7 @@ const (
 	crnKafkaSuffix              = "/kafka="
 	kafkaAclLoggingKey          = "kafka_acl_id"
 	kafkaClusterLoggingKey      = "kafka_cluster_id"
+	kafkaClusterConfigLoggingKey = "kafka_cluster_config_id"
 	kafkaTopicLoggingKey        = "kafka_topic_id"
 	serviceAccountLoggingKey    = "service_account_id"
 	userLoggingKey              = "user_id"
@@ -57,6 +61,9 @@ const (
 	ksqlClusterLoggingKey       = "ksql_cluster_id"
 	identityProviderLoggingKey  = "identity_provider_id"
 	identityPoolLoggingKey      = "identity_pool_id"
+	clusterLinkLoggingKey       = "cluster_link_id"
+	kafkaMirrorTopicLoggingKey  = "kafka_mirror_topic_id"
+	kafkaClientQuotaLoggingKey  = "kafka_client_quota_id"
 )
 
 func (c *Client) apiKeysApiContext(ctx context.Context) context.Context {
@@ -180,6 +187,17 @@ func (c *Client) oidcApiContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+func (c *Client) quotasApiContext(ctx context.Context) context.Context {
+	if c.cloudApiKey != "" && c.cloudApiSecret != "" {
+		return context.WithValue(context.Background(), quotas.ContextBasicAuth, quotas.BasicAuth{
+			UserName: c.cloudApiKey,
+			Password: c.cloudApiSecret,
+		})
+	}
+	tflog.Warn(ctx, "Could not find Cloud API Key")
+	return ctx
+}
+
 func orgApiContext(ctx context.Context, cloudApiKey, cloudApiSecret string) context.Context {
 	if cloudApiKey != "" && cloudApiSecret != "" {
 		return context.WithValue(context.Background(), org.ContextBasicAuth, org.BasicAuth{
@@ -202,93 +220,31 @@ func getTimeoutFor(clusterType string) time.Duration {
 func stringToAclResourceType(aclResourceType string) (kafkarestv3.AclResourceType, error) {
 	switch aclResourceType {
 	case "UNKNOWN":
-		return kafkarestv3.ACLRESOURCETYPE_UNKNOWN, nil
+		return kafkarestv3.UNKNOWN, nil
 	case "ANY":
-		return kafkarestv3.ACLRESOURCETYPE_ANY, nil
+		return kafkarestv3.ANY, nil
 	case "TOPIC":
-		return kafkarestv3.ACLRESOURCETYPE_TOPIC, nil
+		return kafkarestv3.TOPIC, nil
 	case "GROUP":
-		return kafkarestv3.ACLRESOURCETYPE_GROUP, nil
+		return kafkarestv3.GROUP, nil
 	case "CLUSTER":
-		return kafkarestv3.ACLRESOURCETYPE_CLUSTER, nil
+		return kafkarestv3.CLUSTER, nil
 	case "TRANSACTIONAL_ID":
-		return kafkarestv3.ACLRESOURCETYPE_TRANSACTIONAL_ID, nil
+		return kafkarestv3.TRANSACTIONAL_ID, nil
 	case "DELEGATION_TOKEN":
-		return kafkarestv3.ACLRESOURCETYPE_DELEGATION_TOKEN, nil
+		return kafkarestv3.DELEGATION_TOKEN, nil
 	}
 	return "", fmt.Errorf("unknown ACL resource type was found: %q", aclResourceType)
-}
-
-func stringToAclPatternType(aclPatternType string) (kafkarestv3.AclPatternType, error) {
-	switch aclPatternType {
-	case "UNKNOWN":
-		return kafkarestv3.ACLPATTERNTYPE_UNKNOWN, nil
-	case "ANY":
-		return kafkarestv3.ACLPATTERNTYPE_ANY, nil
-	case "MATCH":
-		return kafkarestv3.ACLPATTERNTYPE_MATCH, nil
-	case "LITERAL":
-		return kafkarestv3.ACLPATTERNTYPE_LITERAL, nil
-	case "PREFIXED":
-		return kafkarestv3.ACLPATTERNTYPE_PREFIXED, nil
-	}
-	return "", fmt.Errorf("unknown ACL pattern type was found: %q", aclPatternType)
-}
-
-func stringToAclOperation(aclOperation string) (kafkarestv3.AclOperation, error) {
-	switch aclOperation {
-	case "UNKNOWN":
-		return kafkarestv3.ACLOPERATION_UNKNOWN, nil
-	case "ANY":
-		return kafkarestv3.ACLOPERATION_ANY, nil
-	case "ALL":
-		return kafkarestv3.ACLOPERATION_ALL, nil
-	case "READ":
-		return kafkarestv3.ACLOPERATION_READ, nil
-	case "WRITE":
-		return kafkarestv3.ACLOPERATION_WRITE, nil
-	case "CREATE":
-		return kafkarestv3.ACLOPERATION_CREATE, nil
-	case "DELETE":
-		return kafkarestv3.ACLOPERATION_DELETE, nil
-	case "ALTER":
-		return kafkarestv3.ACLOPERATION_ALTER, nil
-	case "DESCRIBE":
-		return kafkarestv3.ACLOPERATION_DESCRIBE, nil
-	case "CLUSTER_ACTION":
-		return kafkarestv3.ACLOPERATION_CLUSTER_ACTION, nil
-	case "DESCRIBE_CONFIGS":
-		return kafkarestv3.ACLOPERATION_DESCRIBE_CONFIGS, nil
-	case "ALTER_CONFIGS":
-		return kafkarestv3.ACLOPERATION_ALTER_CONFIGS, nil
-	case "IDEMPOTENT_WRITE":
-		return kafkarestv3.ACLOPERATION_IDEMPOTENT_WRITE, nil
-	}
-	return "", fmt.Errorf("unknown ACL operation was found: %q", aclOperation)
-}
-
-func stringToAclPermission(aclPermission string) (kafkarestv3.AclPermission, error) {
-	switch aclPermission {
-	case "UNKNOWN":
-		return kafkarestv3.ACLPERMISSION_UNKNOWN, nil
-	case "ANY":
-		return kafkarestv3.ACLPERMISSION_ANY, nil
-	case "DENY":
-		return kafkarestv3.ACLPERMISSION_DENY, nil
-	case "ALLOW":
-		return kafkarestv3.ACLPERMISSION_ALLOW, nil
-	}
-	return "", fmt.Errorf("unknown ACL permission was found: %q", aclPermission)
 }
 
 type Acl struct {
 	ResourceType kafkarestv3.AclResourceType
 	ResourceName string
-	PatternType  kafkarestv3.AclPatternType
+	PatternType  string
 	Principal    string
 	Host         string
-	Operation    kafkarestv3.AclOperation
-	Permission   kafkarestv3.AclPermission
+	Operation    string
+	Permission   string
 }
 
 func getEnv(key, defaultValue string) string {
@@ -345,7 +301,7 @@ type GenericOpenAPIError interface {
 
 func (f KafkaRestClientFactory) CreateKafkaRestClient(restEndpoint, clusterId, clusterApiKey, clusterApiSecret string, isMetadataSetInProviderBlock bool) *KafkaRestClient {
 	config := kafkarestv3.NewConfiguration()
-	config.BasePath = restEndpoint
+	config.Servers[0].URL = restEndpoint
 	config.UserAgent = f.userAgent
 	config.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
 	return &KafkaRestClient{
@@ -380,15 +336,18 @@ func createDescriptiveError(err error) error {
 		reflectedFailureValue := reflect.Indirect(reflectedFailure)
 		if reflectedFailureValue.IsValid() {
 			errs := reflectedFailureValue.FieldByName("Errors")
-			kafkaRestErrDetailPtr := reflectedFailureValue.FieldByName("Message")
+			kafkaRestErr := reflectedFailureValue.FieldByName("Message")
 			if errs.Kind() == reflect.Slice && errs.Len() > 0 {
 				nest := errs.Index(0)
 				detailPtr := nest.FieldByName("Detail")
-				if detailPtr.IsValid() && !detailPtr.IsNil() {
+				if detailPtr.IsValid() {
 					errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(detailPtr))
 				}
-			} else if kafkaRestErrDetailPtr.IsValid() && !kafkaRestErrDetailPtr.IsNil() {
-				errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(kafkaRestErrDetailPtr))
+			} else if kafkaRestErr.IsValid() {
+				detailPtr := kafkaRestErr.FieldByName("value")
+				if detailPtr.IsValid() {
+					errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(detailPtr))
+				}
 			}
 		}
 	}
@@ -559,4 +518,20 @@ func convertToStringSlice(items []interface{}) []string {
 		stringItems[i] = fmt.Sprint(item)
 	}
 	return stringItems
+}
+
+func clusterSettingsKeysValidate(v interface{}, path cty.Path) diag.Diagnostics {
+	clusterSettingsMap := v.(map[string]interface{})
+
+	if len(clusterSettingsMap) == 0 {
+		return diag.Errorf("error creating / updating Cluster Config: %q block should not be empty", paramConfigs)
+	}
+
+	for clusterSetting, _ := range clusterSettingsMap {
+		if !stringInSlice(clusterSetting, editableClusterSettings, false) {
+			return diag.Errorf("error creating / updating Cluster Config: %q cluster setting is read-only and cannot be updated. "+
+				"Read %s for more details.", clusterSetting, docsClusterConfigUrl)
+		}
+	}
+	return nil
 }

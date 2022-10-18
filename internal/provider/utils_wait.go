@@ -90,9 +90,8 @@ func waitForKafkaClusterToProvision(ctx context.Context, c *Client, environmentI
 
 func waitForKsqlClusterToProvision(ctx context.Context, c *Client, environmentId, clusterId string) error {
 	stateConf := &resource.StateChangeConf{
-		Pending: []string{stateProvisioning},
-		// TODO: KSQL-1235: Remove stateUp when cc-scheduler is updated
-		Target:       []string{stateUp, stateProvisioned},
+		Pending:      []string{stateProvisioning},
+		Target:       []string{stateProvisioned},
 		Refresh:      ksqlClusterProvisionStatus(c.ksqlApiContext(ctx), c, environmentId, clusterId),
 		Timeout:      ksqlCreateTimeout,
 		Delay:        5 * time.Second,
@@ -171,6 +170,24 @@ func waitForConnectorToChangeStatus(ctx context.Context, c *Client, displayName,
 
 	tflog.Debug(ctx, fmt.Sprintf("Waiting for Connector %q=%q status to become %q", paramDisplayName, displayName, targetStatus))
 	if _, err := stateConf.WaitForStateContext(c.connectApiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForKafkaMirrorTopicToChangeStatus(ctx context.Context, c *KafkaRestClient, clusterId, linkName, mirrorTopicName, currentStatus, targetStatus string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending:      []string{currentStatus},
+		Target:       []string{targetStatus},
+		Refresh:      kafkaMirrorTopicUpdateStatus(c.apiContext(ctx), c, clusterId, linkName, mirrorTopicName),
+		Timeout:      5 * time.Minute,
+		Delay:        2 * time.Second,
+		PollInterval: 1 * time.Minute,
+	}
+
+	kafkaMirrorTopicId := createKafkaMirrorTopicId(clusterId, linkName, mirrorTopicName)
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Kafka Mirror Topic %q to be deleted", kafkaMirrorTopicId), map[string]interface{}{kafkaMirrorTopicLoggingKey: kafkaMirrorTopicId})
+	if _, err := stateConf.WaitForStateContext(c.apiContext(ctx)); err != nil {
 		return err
 	}
 	return nil
@@ -264,9 +281,27 @@ func waitForKafkaTopicToBeDeleted(ctx context.Context, c *KafkaRestClient, topic
 	return nil
 }
 
+func waitForKafkaMirrorTopicToBeDeleted(ctx context.Context, c *KafkaRestClient, linkName, mirrorTopicName string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending:      []string{stateInProgress},
+		Target:       []string{stateDone},
+		Refresh:      kafkaMirrorTopicDeleteStatus(c.apiContext(ctx), c, linkName, mirrorTopicName),
+		Timeout:      1 * time.Hour,
+		Delay:        10 * time.Second,
+		PollInterval: 1 * time.Minute,
+	}
+
+	kafkaMirrorTopicId := createKafkaMirrorTopicId(c.clusterId, linkName, mirrorTopicName)
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Kafka Topic %q to be deleted", kafkaMirrorTopicId), map[string]interface{}{kafkaMirrorTopicLoggingKey: kafkaMirrorTopicId})
+	if _, err := stateConf.WaitForStateContext(c.apiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func kafkaTopicDeleteStatus(ctx context.Context, c *KafkaRestClient, topicName string) resource.StateRefreshFunc {
 	return func() (result interface{}, s string, err error) {
-		kafkaTopic, resp, err := c.apiClient.TopicV3Api.GetKafkaV3Topic(c.apiContext(ctx), c.clusterId, topicName)
+		kafkaTopic, resp, err := c.apiClient.TopicV3Api.GetKafkaTopic(c.apiContext(ctx), c.clusterId, topicName).Execute()
 		topicId := createKafkaTopicId(c.clusterId, topicName)
 		if err != nil {
 			tflog.Warn(ctx, fmt.Sprintf("Error reading Kafka Topic %q: %s", topicId, createDescriptiveError(err)), map[string]interface{}{kafkaTopicLoggingKey: topicId})
@@ -281,6 +316,64 @@ func kafkaTopicDeleteStatus(ctx context.Context, c *KafkaRestClient, topicName s
 			}
 		}
 		return kafkaTopic, stateInProgress, nil
+	}
+}
+
+func kafkaMirrorTopicDeleteStatus(ctx context.Context, c *KafkaRestClient, linkName, mirrorTopicName string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		kafkaTopic, resp, err := c.apiClient.ClusterLinkingV3Api.ReadKafkaMirrorTopic(c.apiContext(ctx), c.clusterId, linkName, mirrorTopicName).Execute()
+		kafkaMirrorTopicId := createKafkaMirrorTopicId(c.clusterId, linkName, mirrorTopicName)
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Kafka Mirror Topic %q: %s", kafkaMirrorTopicId, createDescriptiveError(err)), map[string]interface{}{kafkaMirrorTopicLoggingKey: kafkaMirrorTopicId})
+
+			// 404 means that the topic has been deleted
+			isResourceNotFound := ResponseHasExpectedStatusCode(resp, http.StatusNotFound)
+			if isResourceNotFound {
+				// Result (the 1st argument) can't be nil
+				return 0, stateDone, nil
+			} else {
+				return nil, stateFailed, err
+			}
+		}
+		return kafkaTopic, stateInProgress, nil
+	}
+}
+
+func waitForClusterLinkToBeDeleted(ctx context.Context, c *KafkaRestClient, linkName string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending:      []string{stateInProgress},
+		Target:       []string{stateDone},
+		Refresh:      clusterLinkDeleteStatus(c.apiContext(ctx), c, linkName),
+		Timeout:      1 * time.Hour,
+		Delay:        10 * time.Second,
+		PollInterval: 1 * time.Minute,
+	}
+
+	topicId := createClusterLinkId(c.clusterId, linkName)
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Cluster Link %q to be deleted", topicId), map[string]interface{}{clusterLinkLoggingKey: topicId})
+	if _, err := stateConf.WaitForStateContext(c.apiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func clusterLinkDeleteStatus(ctx context.Context, c *KafkaRestClient, linkName string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		clusterLink, resp, err := c.apiClient.ClusterLinkingV3Api.GetKafkaLink(c.apiContext(ctx), c.clusterId, linkName).Execute()
+		clusterLinkId := createClusterLinkId(c.clusterId, linkName)
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Cluster Link %q: %s", clusterLinkId, createDescriptiveError(err)), map[string]interface{}{clusterLinkLoggingKey: clusterLinkId})
+
+			// 404 means that the cluster link has been deleted
+			isResourceNotFound := ResponseHasExpectedStatusCode(resp, http.StatusNotFound)
+			if isResourceNotFound {
+				// Result (the 1st argument) can't be nil
+				return 0, stateDone, nil
+			} else {
+				return nil, stateFailed, err
+			}
+		}
+		return clusterLink, stateInProgress, nil
 	}
 }
 
@@ -410,6 +503,19 @@ func connectorUpdateStatus(ctx context.Context, c *Client, displayName, environm
 	}
 }
 
+func kafkaMirrorTopicUpdateStatus(ctx context.Context, c *KafkaRestClient, clusterId, linkName, mirrorTopicName string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		mirrorKafkaTopic, _, err := c.apiClient.ClusterLinkingV3Api.ReadKafkaMirrorTopic(c.apiContext(ctx), clusterId, linkName, mirrorTopicName).Execute()
+		kafkaMirrorTopicId := createKafkaMirrorTopicId(clusterId, linkName, mirrorTopicName)
+
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Kafka Mirror Topic %q: %s", kafkaMirrorTopicId, createDescriptiveError(err)), map[string]interface{}{kafkaMirrorTopicLoggingKey: kafkaMirrorTopicId})
+			return nil, stateUnknown, err
+		}
+		return mirrorKafkaTopic, string(mirrorKafkaTopic.GetMirrorStatus()), nil
+	}
+}
+
 func peeringProvisionStatus(ctx context.Context, c *Client, environmentId string, peeringId string) resource.StateRefreshFunc {
 	return func() (result interface{}, s string, err error) {
 		peering, _, err := executePeeringRead(c.netApiContext(ctx), c, environmentId, peeringId)
@@ -491,7 +597,7 @@ func cloudApiKeySyncStatus(ctx context.Context, c *Client, cloudApiKey, cloudApi
 
 func kafkaApiKeySyncStatus(ctx context.Context, c *KafkaRestClient) resource.StateRefreshFunc {
 	return func() (result interface{}, s string, err error) {
-		_, resp, err := c.apiClient.TopicV3Api.ListKafkaV3Topics(kafkaRestApiContextWithClusterApiKey(ctx, c.clusterApiKey, c.clusterApiSecret), c.clusterId)
+		_, resp, err := c.apiClient.TopicV3Api.ListKafkaTopics(kafkaRestApiContextWithClusterApiKey(ctx, c.clusterApiKey, c.clusterApiSecret), c.clusterId).Execute()
 		if resp != nil && resp.StatusCode == http.StatusOK {
 			tflog.Debug(ctx, fmt.Sprintf("Finishing Kafka API Key %q sync process: Received %d status code when listing Kafka Topics", c.clusterApiKey, resp.StatusCode), map[string]interface{}{apiKeyLoggingKey: c.clusterApiKey})
 			return 0, stateDone, nil
