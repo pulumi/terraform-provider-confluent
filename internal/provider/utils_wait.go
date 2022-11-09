@@ -140,6 +140,24 @@ func waitForNetworkToProvision(ctx context.Context, c *Client, environmentId, ne
 	return nil
 }
 
+func waitForStreamGovernanceClusterToProvision(ctx context.Context, c *Client, environmentId, clusterId string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending: []string{stateProvisioning},
+		Target:  []string{stateProvisioned},
+		Refresh: streamGovernanceClusterProvisionStatus(c.sgApiContext(ctx), c, environmentId, clusterId),
+		// https://docs.confluent.io/cloud/current/clusters/cluster-types.html#provisioning-time
+		Timeout:      1 * time.Hour,
+		Delay:        5 * time.Second,
+		PollInterval: 30 * time.Second,
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Stream Governance Cluster %q provisioning status to become %q", clusterId, stateProvisioned), map[string]interface{}{streamGovernanceClusterLoggingKey: clusterId})
+	if _, err := stateConf.WaitForStateContext(c.sgApiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func waitForConnectorToProvision(ctx context.Context, c *Client, displayName, environmentId, clusterId string) error {
 	stateConf := &resource.StateChangeConf{
 		// Allow PROVISIONING -> DEGRADED -> RUNNING transition
@@ -147,7 +165,7 @@ func waitForConnectorToProvision(ctx context.Context, c *Client, displayName, en
 		Target:       []string{stateRunning},
 		Refresh:      connectorProvisionStatus(c.connectApiContext(ctx), c, displayName, environmentId, clusterId),
 		Timeout:      connectAPICreateTimeout,
-		Delay:        1 * time.Minute,
+		Delay:        6 * time.Minute,
 		PollInterval: 1 * time.Minute,
 	}
 
@@ -211,6 +229,24 @@ func waitForPeeringToProvision(ctx context.Context, c *Client, environmentId, pe
 	return nil
 }
 
+func waitForTransitGatewayAttachmentToProvision(ctx context.Context, c *Client, environmentId, transitGatewayAttachmentId string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending: []string{stateProvisioning},
+		Target:  []string{stateReady, statePendingAccept},
+		Refresh: transitGatewayAttachmentProvisionStatus(c.netApiContext(ctx), c, environmentId, transitGatewayAttachmentId),
+		Timeout: networkingAPICreateTimeout,
+		// TODO: increase delay
+		Delay:        5 * time.Second,
+		PollInterval: 1 * time.Minute,
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Transit Gateway Attachment %q provisioning status to become %q", transitGatewayAttachmentId, statePendingAccept), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+	if _, err := stateConf.WaitForStateContext(c.netApiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func waitForKafkaClusterCkuUpdateToComplete(ctx context.Context, c *Client, environmentId, clusterId string, cku int32) error {
 	stateConf := &resource.StateChangeConf{
 		Pending: []string{stateInProgress},
@@ -257,6 +293,23 @@ func waitForPeeringToBeDeleted(ctx context.Context, c *Client, environmentId, pe
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("Waiting for Peering %q to be deleted", peeringId), map[string]interface{}{peeringLoggingKey: peeringId})
+	if _, err := stateConf.WaitForStateContext(c.netApiContext(ctx)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForTransitGatewayAttachmentToBeDeleted(ctx context.Context, c *Client, environmentId, transitGatewayAttachmentId string) error {
+	stateConf := &resource.StateChangeConf{
+		Pending:      []string{stateInProgress},
+		Target:       []string{stateDone},
+		Refresh:      transitGatewayAttachmentDeleteStatus(c.netApiContext(ctx), c, environmentId, transitGatewayAttachmentId),
+		Timeout:      networkingAPIDeleteTimeout,
+		Delay:        1 * time.Minute,
+		PollInterval: 1 * time.Minute,
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Waiting for Transit Gateway Attachment %q to be deleted", transitGatewayAttachmentId), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
 	if _, err := stateConf.WaitForStateContext(c.netApiContext(ctx)); err != nil {
 		return err
 	}
@@ -436,6 +489,25 @@ func ksqlClusterProvisionStatus(ctx context.Context, c *Client, environmentId, c
 	}
 }
 
+func streamGovernanceClusterProvisionStatus(ctx context.Context, c *Client, environmentId string, clusterId string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		cluster, _, err := executeStreamGovernanceClusterRead(c.sgApiContext(ctx), c, environmentId, clusterId)
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Stream Governance Cluster %q: %s", clusterId, createDescriptiveError(err)), map[string]interface{}{streamGovernanceClusterLoggingKey: clusterId})
+			return nil, stateUnknown, err
+		}
+
+		tflog.Debug(ctx, fmt.Sprintf("Waiting for Stream Governance Cluster %q provisioning status to become %q: current status is %q", clusterId, stateProvisioned, cluster.Status.GetPhase()), map[string]interface{}{streamGovernanceClusterLoggingKey: clusterId})
+		if cluster.Status.GetPhase() == stateProvisioning || cluster.Status.GetPhase() == stateProvisioned {
+			return cluster, cluster.Status.GetPhase(), nil
+		} else if cluster.Status.GetPhase() == stateFailed {
+			return nil, stateFailed, fmt.Errorf("stream Governance Cluster %q provisioning status is %q", clusterId, stateFailed)
+		}
+		// SG Cluster is in an unexpected state
+		return nil, stateUnexpected, fmt.Errorf("stream Governance Cluster %q is an unexpected state %q", clusterId, cluster.Status.GetPhase())
+	}
+}
+
 func privateLinkAccessProvisionStatus(ctx context.Context, c *Client, environmentId string, privateLinkAccessId string) resource.StateRefreshFunc {
 	return func() (result interface{}, s string, err error) {
 		privateLinkAccess, _, err := executePrivateLinkAccessRead(c.netApiContext(ctx), c, environmentId, privateLinkAccessId)
@@ -535,6 +607,25 @@ func peeringProvisionStatus(ctx context.Context, c *Client, environmentId string
 	}
 }
 
+func transitGatewayAttachmentProvisionStatus(ctx context.Context, c *Client, environmentId string, transitGatewayAttachmentId string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		transitGatewayAttachment, _, err := executeTransitGatewayAttachmentRead(c.netApiContext(ctx), c, environmentId, transitGatewayAttachmentId)
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Peering %q: %s", transitGatewayAttachmentId, createDescriptiveError(err)), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+			return nil, stateUnknown, err
+		}
+
+		tflog.Debug(ctx, fmt.Sprintf("Waiting for Peering %q provisioning status to become %q: current status is %q", transitGatewayAttachmentId, statePendingAccept, transitGatewayAttachment.Status.GetPhase()), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+		if transitGatewayAttachment.Status.GetPhase() == stateProvisioning || transitGatewayAttachment.Status.GetPhase() == stateReady || transitGatewayAttachment.Status.GetPhase() == statePendingAccept {
+			return transitGatewayAttachment, transitGatewayAttachment.Status.GetPhase(), nil
+		} else if transitGatewayAttachment.Status.GetPhase() == stateFailed {
+			return nil, stateFailed, fmt.Errorf("transit Gateway Attachment %q provisioning status is %q: %s", transitGatewayAttachmentId, stateFailed, transitGatewayAttachment.Status.GetErrorMessage())
+		}
+		// Peering is in an unexpected state
+		return nil, stateUnexpected, fmt.Errorf("transit Gateway Attachment %q is an unexpected state %q: %s", transitGatewayAttachmentId, transitGatewayAttachment.Status.GetPhase(), transitGatewayAttachment.Status.GetErrorMessage())
+	}
+}
+
 func privateLinkAccessDeleteStatus(ctx context.Context, c *Client, environmentId, privateLinkAccessId string) resource.StateRefreshFunc {
 	return func() (result interface{}, s string, err error) {
 		privateLinkAccess, resp, err := executePrivateLinkAccessRead(c.netApiContext(ctx), c, environmentId, privateLinkAccessId)
@@ -572,6 +663,26 @@ func peeringDeleteStatus(ctx context.Context, c *Client, environmentId, peeringI
 		}
 		tflog.Debug(ctx, fmt.Sprintf("Performing Peering %q deletion process: Peering %d's status is %q", peeringId, resp.StatusCode, peering.Status.GetPhase()), map[string]interface{}{peeringLoggingKey: peeringId})
 		return peering, stateInProgress, nil
+	}
+}
+
+func transitGatewayAttachmentDeleteStatus(ctx context.Context, c *Client, environmentId, transitGatewayAttachmentId string) resource.StateRefreshFunc {
+	return func() (result interface{}, s string, err error) {
+		transitGatewayAttachment, resp, err := executeTransitGatewayAttachmentRead(c.netApiContext(ctx), c, environmentId, transitGatewayAttachmentId)
+		if err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Error reading Transit Gateway Attachment %q: %s", transitGatewayAttachmentId, createDescriptiveError(err)), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+
+			isResourceNotFound := isNonKafkaRestApiResourceNotFound(resp)
+			if isResourceNotFound {
+				tflog.Debug(ctx, fmt.Sprintf("Finishing Transit Gateway Attachment %q deletion process: Received %d status code when reading %q Transit Gateway Attachment", transitGatewayAttachmentId, resp.StatusCode, transitGatewayAttachmentId), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+				return 0, stateDone, nil
+			} else {
+				tflog.Debug(ctx, fmt.Sprintf("Exiting Transit Gateway Attachment %q deletion process: Failed when reading Transit Gateway Attachment: %s: %s", transitGatewayAttachmentId, createDescriptiveError(err), transitGatewayAttachment.Status.GetErrorMessage()), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+				return nil, stateFailed, err
+			}
+		}
+		tflog.Debug(ctx, fmt.Sprintf("Performing Transit Gateway Attachment %q deletion process: Transit Gateway Attachment %d's status is %q", transitGatewayAttachmentId, resp.StatusCode, transitGatewayAttachment.Status.GetPhase()), map[string]interface{}{transitGatewayAttachmentLoggingKey: transitGatewayAttachmentId})
+		return transitGatewayAttachment, stateInProgress, nil
 	}
 }
 

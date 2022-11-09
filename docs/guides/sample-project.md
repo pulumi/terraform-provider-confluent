@@ -6,7 +6,7 @@ page_title: "Sample Project"
 
 ## Summary
 
-[![asciicast](https://asciinema.org/a/528096.svg)](https://asciinema.org/a/528096)
+[![asciicast](https://asciinema.org/a/534729.svg)](https://asciinema.org/a/534729)
 
 Use the Confluent Terraform provider to enable the lifecycle management of Confluent Cloud resources:
    * [Environments](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_environment)
@@ -16,10 +16,18 @@ Use the Confluent Terraform provider to enable the lifecycle management of Confl
    * [Networks](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_network)
    * [Private Link Accesses](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_private_link_access)
    * [Peerings](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_peering)
+   * [Transit Gateway Attachments](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_transit_gateway_attachment)
    * [Service Accounts](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_service_account)
    * [Cloud API Keys and Kafka API Keys](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_api_key)
    * [Access Control Lists (ACLs)](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_acl)
    * [Role Bindings](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_role_binding)
+   * [Cluster Links](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_cluster_link)
+   * [Identity Providers](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_identity_provider)
+   * [Identity Pool](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_identity_pool)
+   * [Kafka Client Quotas](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_client_quota)
+   * [Kafka Cluster Configs](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_cluster_config)
+   * [Kafka Mirror Topics](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_mirror_topic)
+   * [Stream Governance Clusters](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_stream_governance_cluster)
 
 In this guide, you will:
 
@@ -104,6 +112,8 @@ In this guide, you will:
     * [`dedicated-vpc-peering-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via VPC Peering connections with authorization using RBAC
     * [`dedicated-vpc-peering-gcp-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-gcp-kafka-acls): _Dedicated_ Kafka cluster on GCP that is accessible via VPC Peering connections with authorization using ACLs
     * [`dedicated-vpc-peering-gcp-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-gcp-kafka-rbac): _Dedicated_ Kafka cluster on GCP that is accessible via VPC Peering connections with authorization using RBAC
+    * [`dedicated-transit-gateway-attachment-aws-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-acls): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using ACLs
+    * [`dedicated-transit-gateway-attachment-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using RBAC
 
     -> **Note:** _Basic_ Kafka cluster with authorization using RBAC configuration is not supported, because both `DeveloperRead` and `DeveloperWrite` roles are not available for _Basic_ Kafka clusters.
     

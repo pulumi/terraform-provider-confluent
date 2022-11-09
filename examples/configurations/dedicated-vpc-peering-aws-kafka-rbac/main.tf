@@ -3,7 +3,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.8.0"
+      version = "1.13.0"
     }
     aws = {
       source  = "hashicorp/aws"
@@ -19,6 +19,27 @@ provider "confluent" {
 
 resource "confluent_environment" "staging" {
   display_name = "Staging"
+}
+
+# Stream Governance and Kafka clusters can be in different regions as well as different cloud providers,
+# but you should to place both in the same cloud and region to restrict the fault isolation boundary.
+data "confluent_stream_governance_region" "essentials" {
+  cloud   = "AWS"
+  region  = "us-east-2"
+  package = "ESSENTIALS"
+}
+
+resource "confluent_stream_governance_cluster" "essentials" {
+  package = data.confluent_stream_governance_region.essentials.package
+
+  environment {
+    id = confluent_environment.staging.id
+  }
+
+  region {
+    # See https://docs.confluent.io/cloud/current/stream-governance/packages.html#stream-governance-regions
+    id = data.confluent_stream_governance_region.essentials.id
+  }
 }
 
 resource "confluent_network" "peering" {
@@ -239,7 +260,7 @@ resource "aws_vpc_peering_connection_accepter" "peer" {
 
 # Find the routing table
 data "aws_route_tables" "rts" {
-  vpc_id = confluent_peering.aws.aws[0].vpc
+  vpc_id = var.vpc_id
 }
 
 resource "aws_route" "r" {
@@ -247,8 +268,4 @@ resource "aws_route" "r" {
   route_table_id            = each.key
   destination_cidr_block    = confluent_network.peering.cidr
   vpc_peering_connection_id = data.aws_vpc_peering_connection.accepter.id
-
-  depends_on = [
-    aws_vpc_peering_connection_accepter.peer
-  ]
 }

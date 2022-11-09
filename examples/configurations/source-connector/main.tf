@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.8.0"
+      version = "1.13.0"
     }
   }
 }
@@ -14,6 +14,27 @@ provider "confluent" {
 
 resource "confluent_environment" "staging" {
   display_name = "Staging"
+}
+
+# Stream Governance and Kafka clusters can be in different regions as well as different cloud providers,
+# but you should to place both in the same cloud and region to restrict the fault isolation boundary.
+data "confluent_stream_governance_region" "essentials" {
+  cloud   = "AWS"
+  region  = "us-east-2"
+  package = "ESSENTIALS"
+}
+
+resource "confluent_stream_governance_cluster" "essentials" {
+  package = data.confluent_stream_governance_region.essentials.package
+
+  environment {
+    id = confluent_environment.staging.id
+  }
+
+  region {
+    # See https://docs.confluent.io/cloud/current/stream-governance/packages.html#stream-governance-regions
+    id = data.confluent_stream_governance_region.essentials.id
+  }
 }
 
 # Update the config to use a cloud provider and region of your choice.
@@ -283,8 +304,12 @@ resource "confluent_connector" "source" {
     id = confluent_kafka_cluster.basic.id
   }
 
+  // Block for custom *sensitive* configuration properties that are labelled with "Type: password" under "Configuration Properties" section in the docs:
+  // https://docs.confluent.io/cloud/current/connectors/cc-datagen-source.html#configuration-properties
   config_sensitive = {}
 
+  // Block for custom *nonsensitive* configuration properties that are *not* labelled with "Type: password" under "Configuration Properties" section in the docs:
+  // https://docs.confluent.io/cloud/current/connectors/cc-datagen-source.html#configuration-properties
   config_nonsensitive = {
     "connector.class"          = "DatagenSource"
     "name"                     = "DatagenSourceConnector_0"

@@ -54,6 +54,12 @@ resource "confluent_role_binding" "group-example-rb" {
   crn_pattern = "${confluent_kafka_cluster.basic.rbac_crn}/kafka=${confluent_kafka_cluster.standard.id}/group=confluent_cli_consumer_*"
 }
 
+resource "confluent_role_binding" "transaction-example-rb" {
+  principal = "User:${confluent_service_account.test.id}"
+  role_name = "DeveloperRead"
+  crn_pattern = "${confluent_kafka_cluster.basic.rbac_crn}/kafka=${confluent_kafka_cluster.standard.id}/transactional-id=my_transaction"
+}
+
 resource "confluent_role_binding" "connector-example-rb" {
   principal   = "User:${confluent_service_account.test.id}"
   role_name   = "DeveloperRead"
@@ -103,3 +109,5 @@ The following end-to-end examples might help to get started with `confluent_role
   * [`dedicated-vnet-peering-azure-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vnet-peering-azure-kafka-rbac): _Dedicated_ Kafka cluster on Azure that is accessible via VPC Peering connections with authorization using RBAC
   * [`dedicated-vpc-peering-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via VPC Peering connections with authorization using RBAC
   * [`dedicated-vpc-peering-gcp-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-gcp-kafka-rbac): _Dedicated_ Kafka cluster on GCP that is accessible via VPC Peering connections with authorization using RBAC
+  * [`dedicated-transit-gateway-attachment-aws-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-acls): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using ACLs
+  * [`dedicated-transit-gateway-attachment-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using RBAC

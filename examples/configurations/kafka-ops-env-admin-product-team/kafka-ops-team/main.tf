@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.8.0"
+      version = "1.13.0"
     }
   }
 }
@@ -14,6 +14,19 @@ provider "confluent" {
 
 resource "confluent_environment" "staging" {
   display_name = "Staging"
+}
+
+resource "confluent_stream_governance_cluster" "essentials" {
+  package = "ESSENTIALS"
+
+  environment {
+    id = confluent_environment.staging.id
+  }
+
+  region {
+    # See https://docs.confluent.io/cloud/current/stream-governance/packages.html#stream-governance-regions
+    id = "sgreg-1"
+  }
 }
 
 resource "confluent_service_account" "env-manager" {

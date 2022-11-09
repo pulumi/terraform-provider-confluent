@@ -3,7 +3,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.8.0"
+      version = "1.13.0"
     }
     google = {
       source  = "hashicorp/google"
@@ -19,6 +19,21 @@ provider "confluent" {
 
 resource "confluent_environment" "staging" {
   display_name = "Staging"
+}
+
+resource "confluent_stream_governance_cluster" "essentials" {
+  package = "ESSENTIALS"
+
+  environment {
+    id = confluent_environment.staging.id
+  }
+
+  region {
+    # See https://docs.confluent.io/cloud/current/stream-governance/packages.html#stream-governance-regions
+    # Stream Governance and Kafka clusters can be in different regions as well as different cloud providers,
+    # but you should to place both in the same cloud and region to restrict the fault isolation boundary.
+    id = "sgreg-2"
+  }
 }
 
 resource "confluent_network" "peering" {

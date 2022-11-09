@@ -88,7 +88,7 @@ The following arguments are supported:
     - `name` - (Required String) The setting name, for example, `cleanup.policy`.
     - `value` - (Required String) The setting value, for example, `compact`.
 
--> **Note:** For more information on the topic settings, see [Custom topic settings for all cluster types](https://docs.confluent.io/cloud/current/clusters/broker-config.html#custom-topic-settings-for-all-cluster-types) and [Schema Validation Configuration options on a topic](https://docs.confluent.io/cloud/current/sr/broker-side-schema-validation.html#sv-configuration-options-on-a-topic).
+-> **Note:** For more information on the topic settings, see [Custom topic settings for all cluster types supported by Kafka REST API and Terraform Provider](https://docs.confluent.io/cloud/current/clusters/broker-config.html#custom-topic-settings-for-all-cluster-types-supported-by-kafka-rest-api-and-terraform-provider) and [Schema Validation Configuration options on a topic](https://docs.confluent.io/cloud/current/sr/broker-side-schema-validation.html#sv-configuration-options-on-a-topic).
 
 -> **Note:** Updates for the following topic settings are supported: `delete.retention.ms`,
              `max.message.bytes`, `max.compaction.lag.ms`, `message.timestamp.difference.max.ms`, `message.timestamp.type`,
@@ -125,7 +125,7 @@ resource "confluent_kafka_topic" "orders" {
   topic_name         = "orders"
   partitions_count   = 4
   rest_endpoint      = confluent_kafka_cluster.basic-cluster.rest_endpoint
-  # https://docs.confluent.io/cloud/current/clusters/broker-config.html#custom-topic-settings-for-all-cluster-types
+  # https://docs.confluent.io/cloud/current/clusters/broker-config.html#custom-topic-settings-for-all-cluster-types-supported-by-kafka-rest-api-and-terraform-provider
   config = {
     "cleanup.policy"                      = "delete"
     "delete.retention.ms"                 = "86400000"
@@ -168,3 +168,5 @@ The following end-to-end examples might help to get started with `confluent_kafk
   * [`dedicated-vpc-peering-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via VPC Peering connections with authorization using RBAC
   * [`dedicated-vpc-peering-gcp-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-gcp-kafka-acls): _Dedicated_ Kafka cluster on GCP that is accessible via VPC Peering connections with authorization using ACLs
   * [`dedicated-vpc-peering-gcp-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-vpc-peering-gcp-kafka-rbac): _Dedicated_ Kafka cluster on GCP that is accessible via VPC Peering connections with authorization using RBAC
+  * [`dedicated-transit-gateway-attachment-aws-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-acls): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using ACLs
+  * [`dedicated-transit-gateway-attachment-aws-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-transit-gateway-attachment-aws-kafka-rbac): _Dedicated_ Kafka cluster on AWS that is accessible via Transit Gateway Endpoint with authorization using RBAC

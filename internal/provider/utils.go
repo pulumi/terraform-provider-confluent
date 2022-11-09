@@ -29,6 +29,7 @@ import (
 	mds "github.com/confluentinc/ccloud-sdk-go-v2/mds/v2"
 	net "github.com/confluentinc/ccloud-sdk-go-v2/networking/v1"
 	org "github.com/confluentinc/ccloud-sdk-go-v2/org/v2"
+	sg "github.com/confluentinc/ccloud-sdk-go-v2/stream-governance/v2"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -44,26 +45,28 @@ import (
 )
 
 const (
-	crnKafkaSuffix              = "/kafka="
-	kafkaAclLoggingKey          = "kafka_acl_id"
-	kafkaClusterLoggingKey      = "kafka_cluster_id"
-	kafkaClusterConfigLoggingKey = "kafka_cluster_config_id"
-	kafkaTopicLoggingKey        = "kafka_topic_id"
-	serviceAccountLoggingKey    = "service_account_id"
-	userLoggingKey              = "user_id"
-	environmentLoggingKey       = "environment_id"
-	roleBindingLoggingKey       = "role_binding_id"
-	apiKeyLoggingKey            = "api_key_id"
-	networkLoggingKey           = "network_key_id"
-	connectorLoggingKey         = "connector_key_id"
-	privateLinkAccessLoggingKey = "private_link_access_id"
-	peeringLoggingKey           = "peering_id"
-	ksqlClusterLoggingKey       = "ksql_cluster_id"
-	identityProviderLoggingKey  = "identity_provider_id"
-	identityPoolLoggingKey      = "identity_pool_id"
-	clusterLinkLoggingKey       = "cluster_link_id"
-	kafkaMirrorTopicLoggingKey  = "kafka_mirror_topic_id"
-	kafkaClientQuotaLoggingKey  = "kafka_client_quota_id"
+	crnKafkaSuffix                     = "/kafka="
+	kafkaAclLoggingKey                 = "kafka_acl_id"
+	kafkaClusterLoggingKey             = "kafka_cluster_id"
+	kafkaClusterConfigLoggingKey       = "kafka_cluster_config_id"
+	streamGovernanceClusterLoggingKey  = "stream_governance_cluster_id"
+	kafkaTopicLoggingKey               = "kafka_topic_id"
+	serviceAccountLoggingKey           = "service_account_id"
+	userLoggingKey                     = "user_id"
+	environmentLoggingKey              = "environment_id"
+	roleBindingLoggingKey              = "role_binding_id"
+	apiKeyLoggingKey                   = "api_key_id"
+	networkLoggingKey                  = "network_key_id"
+	connectorLoggingKey                = "connector_key_id"
+	privateLinkAccessLoggingKey        = "private_link_access_id"
+	peeringLoggingKey                  = "peering_id"
+	transitGatewayAttachmentLoggingKey = "transit_gateway_attachment_id"
+	ksqlClusterLoggingKey              = "ksql_cluster_id"
+	identityProviderLoggingKey         = "identity_provider_id"
+	identityPoolLoggingKey             = "identity_pool_id"
+	clusterLinkLoggingKey              = "cluster_link_id"
+	kafkaMirrorTopicLoggingKey         = "kafka_mirror_topic_id"
+	kafkaClientQuotaLoggingKey         = "kafka_client_quota_id"
 )
 
 func (c *Client) apiKeysApiContext(ctx context.Context) context.Context {
@@ -135,6 +138,17 @@ func (c *Client) mdsApiContext(ctx context.Context) context.Context {
 func (c *Client) netApiContext(ctx context.Context) context.Context {
 	if c.cloudApiKey != "" && c.cloudApiSecret != "" {
 		return context.WithValue(context.Background(), net.ContextBasicAuth, net.BasicAuth{
+			UserName: c.cloudApiKey,
+			Password: c.cloudApiSecret,
+		})
+	}
+	tflog.Warn(ctx, "Could not find Cloud API Key")
+	return ctx
+}
+
+func (c *Client) sgApiContext(ctx context.Context) context.Context {
+	if c.cloudApiKey != "" && c.cloudApiSecret != "" {
+		return context.WithValue(context.Background(), sg.ContextBasicAuth, sg.BasicAuth{
 			UserName: c.cloudApiKey,
 			Password: c.cloudApiSecret,
 		})
@@ -336,18 +350,20 @@ func createDescriptiveError(err error) error {
 		reflectedFailureValue := reflect.Indirect(reflectedFailure)
 		if reflectedFailureValue.IsValid() {
 			errs := reflectedFailureValue.FieldByName("Errors")
-			kafkaRestErr := reflectedFailureValue.FieldByName("Message")
+			kafkaRestOrConnectErr := reflectedFailureValue.FieldByName("Message")
 			if errs.Kind() == reflect.Slice && errs.Len() > 0 {
 				nest := errs.Index(0)
 				detailPtr := nest.FieldByName("Detail")
 				if detailPtr.IsValid() {
 					errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(detailPtr))
 				}
-			} else if kafkaRestErr.IsValid() {
-				detailPtr := kafkaRestErr.FieldByName("value")
+			} else if kafkaRestOrConnectErr.IsValid() && kafkaRestOrConnectErr.Kind() == reflect.Struct {
+				detailPtr := kafkaRestOrConnectErr.FieldByName("value")
 				if detailPtr.IsValid() {
 					errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(detailPtr))
 				}
+			} else if kafkaRestOrConnectErr.IsValid() && kafkaRestOrConnectErr.Kind() == reflect.Pointer {
+				errorMessage = fmt.Sprintf("%s: %s", errorMessage, reflect.Indirect(kafkaRestOrConnectErr))
 			}
 		}
 	}

@@ -10,6 +10,9 @@ description: |-
 
 [![Open Preview](https://img.shields.io/badge/Lifecycle%20Stage-Open%20Preview-%2300afba)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
+-> **Note:** `confluent_cluster_link` resource is available in **Open Preview** for early adopters. Open Preview features are introduced to gather customer feedback. This feature should be used only for evaluation and non-production testing purposes or to provide feedback to Confluent, particularly as it becomes more widely available in follow-on editions.  
+**Open Preview** features are intended for evaluation use in development and testing environments only, and not for production use. The warranty, SLA, and Support Services provisions of your agreement with Confluent do not apply to Open Preview features. Open Preview features are considered to be a Proof of Concept as defined in the Confluent Cloud Terms of Service. Confluent may discontinue providing preview releases of the Open Preview features at any time in Confluent’s sole discretion.
+
 `confluent_cluster_link` provides a Cluster Link resource that enables creating and deleting Cluster Links on a Kafka cluster on Confluent Cloud.
 
 -> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental cluster link deletion. This setting rejects plans that would destroy or recreate the cluster link. Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).
@@ -50,17 +53,17 @@ The following arguments are supported:
 
 - `link_name` - (Required String) The name of the cluster link, for example, `my-cluster-link`.
 - `source_kafka_cluster` - (Required Configuration Block) supports the following:
-      - `id` - (Required String) The ID of the source Kafka cluster, for example, `lkc-abc123`.
-      - `rest_endpoint` - (Optional String) The REST endpoint of the source Kafka cluster, for example, `https://pkc-00000.us-central1.gcp.confluent.cloud:443`).
-      - `bootstrap_endpoint` - (Optional String) The bootstrap endpoint of the source Kafka cluster, for example, `SASL_SSL://pkc-00000.us-central1.gcp.confluent.cloud:9092`).
-      - `credentials` (Optional Configuration Block) supports the following:
-  - `key` - (Required String) The Kafka API Key.
-  - `secret` - (Required String, Sensitive) The Kafka API Secret.
+  - `id` - (Required String) The ID of the source Kafka cluster, for example, `lkc-abc123`.
+  - `rest_endpoint` - (Optional String) The REST endpoint of the source Kafka cluster, for example, `https://pkc-00000.us-central1.gcp.confluent.cloud:443`).
+  - `bootstrap_endpoint` - (Optional String) The bootstrap endpoint of the source Kafka cluster, for example, `SASL_SSL://pkc-00000.us-central1.gcp.confluent.cloud:9092` or `pkc-00000.us-central1.gcp.confluent.cloud:9092`).
+  - `credentials` (Optional Configuration Block) supports the following:
+    - `key` - (Required String) The Kafka API Key.
+    - `secret` - (Required String, Sensitive) The Kafka API Secret.
 - `destination_kafka_cluster` - (Required Configuration Block) supports the following:
   - `id` - (Required String) The ID of the destination Kafka cluster, for example, `lkc-abc123`.
   - `rest_endpoint` - (Optional String) The REST endpoint of the destination Kafka cluster, for example, `https://pkc-00000.us-central1.gcp.confluent.cloud:443`).
-  - `bootstrap_endpoint` - (Optional String) The bootstrap endpoint of the destination Kafka cluster, for example, `SASL_SSL://pkc-00000.us-central1.gcp.confluent.cloud:9092`).
-  - `credentials` (Optional Configuration Block) supports the following:
+  - `bootstrap_endpoint` - (Optional String) The bootstrap endpoint of the destination Kafka cluster, for example, `SASL_SSL://pkc-00000.us-central1.gcp.confluent.cloud:9092` or `pkc-00000.us-central1.gcp.confluent.cloud:9092`).
+  - `credentials` (Required Configuration Block) supports the following:
     - `key` - (Required String) The Kafka API Key.
     - `secret` - (Required String, Sensitive) The Kafka API Secret.
 - `link_mode` (Optional String) The mode of the cluster link. The supported values are `"DESTINATION"` and `"SOURCE"`. Defaults to `"DESTINATION"`.
