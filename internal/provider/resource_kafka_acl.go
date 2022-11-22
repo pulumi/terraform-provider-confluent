@@ -98,7 +98,7 @@ func kafkaAclResource() *schema.Resource {
 				Required:     true,
 				ForceNew:     true,
 				Description:  "The principal for the ACL.",
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^User:(sa|u)-"), "the principal must start with 'User:sa-' or 'User:u-'."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile("^User:(sa|u|pool)-"), "the principal must start with 'User:sa-' or 'User:u-' or 'User:pool-'."),
 			},
 			paramHost: {
 				Type:        schema.TypeString,
@@ -267,7 +267,7 @@ func kafkaAclRead(ctx context.Context, d *schema.ResourceData, meta interface{})
 	// This hack is necessary since terraform plan will use the principal's value (integerId) from terraform.state
 	// instead of using the new provided resourceId from main.tf (the user will be forced to replace integerId with resourceId
 	// that we have an input validation for using "User:sa-" for principal attribute.
-	if !(strings.HasPrefix(acl.Principal, "User:sa-") || strings.HasPrefix(acl.Principal, "User:u-")) {
+	if !(strings.HasPrefix(acl.Principal, "User:sa-") || strings.HasPrefix(acl.Principal, "User:u-") || strings.HasPrefix(acl.Principal, "User:pool-")) {
 		d.SetId("")
 		return nil
 	}
@@ -315,6 +315,12 @@ func readAclAndSetAttributes(ctx context.Context, d *schema.ResourceData, client
 		return nil, err
 	}
 	if len(remoteAcls.Data) == 0 {
+		// Essentially len(data) = 0 means 404, so we should duplicate the code from the previous if statement
+		if !d.IsNewResource() {
+			tflog.Warn(ctx, fmt.Sprintf("Removing Kafka ACLs %q in TF state because Kafka ACLs could not be found on the server", d.Id()), map[string]interface{}{kafkaAclLoggingKey: d.Id()})
+			d.SetId("")
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error reading Kafka ACLs %q: no Kafka ACLs were matched", d.Id())
 	} else if len(remoteAcls.Data) > 1 {
 		// TODO: use remoteAcls.Data

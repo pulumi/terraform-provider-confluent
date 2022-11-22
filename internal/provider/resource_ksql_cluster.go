@@ -61,7 +61,7 @@ func ksqlResource() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			paramHttpEndpoint: {
+			paramRestEndpoint: {
 				Type:        schema.TypeString,
 				Description: "The API endpoint of the ksqlDB cluster.",
 				Computed:    true,
@@ -267,7 +267,7 @@ func setKsqlAttributes(d *schema.ResourceData, cluster ksql.KsqldbcmV2Cluster) (
 	if err := d.Set(paramKind, cluster.GetKind()); err != nil {
 		return nil, createDescriptiveError(err)
 	}
-	if err := d.Set(paramHttpEndpoint, cluster.Status.GetHttpEndpoint()); err != nil {
+	if err := d.Set(paramRestEndpoint, cluster.Status.GetHttpEndpoint()); err != nil {
 		return nil, createDescriptiveError(err)
 	}
 	if err := d.Set(paramStorage, cluster.Status.GetStorage()); err != nil {

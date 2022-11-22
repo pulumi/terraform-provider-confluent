@@ -7,7 +7,7 @@ terraform {
     }
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.13.0"
+      version = "1.16.0"
     }
   }
 }
@@ -21,7 +21,7 @@ resource "confluent_environment" "staging" {
   display_name = "Staging"
 }
 
-resource "confluent_stream_governance_cluster" "essentials" {
+resource "confluent_schema_registry_cluster" "essentials" {
   package = "ESSENTIALS"
 
   environment {
