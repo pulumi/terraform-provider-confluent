@@ -29,10 +29,10 @@ import (
 	net "github.com/confluentinc/ccloud-sdk-go-v2/networking/v1"
 	org "github.com/confluentinc/ccloud-sdk-go-v2/org/v2"
 	srcm "github.com/confluentinc/ccloud-sdk-go-v2/srcm/v2"
-	sg "github.com/confluentinc/ccloud-sdk-go-v2/stream-governance/v2"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"strings"
 )
 
@@ -65,7 +65,6 @@ type Client struct {
 	mdsClient              *mds.APIClient
 	oidcClient             *oidc.APIClient
 	quotasClient           *quotas.APIClient
-	sgClient               *sg.APIClient
 	srcmClient             *srcm.APIClient
 	userAgent              string
 	cloudApiKey            string
@@ -133,6 +132,12 @@ func New(version, userAgent string) func() *schema.Provider {
 					Default:     "https://api.confluent.cloud",
 					Description: "The base endpoint of Confluent Cloud API.",
 				},
+				"max_retries": {
+					Type:         schema.TypeInt,
+					Optional:     true,
+					ValidateFunc: validation.IntAtLeast(5),
+					Description:  "Maximum number of retries of HTTP client. Defaults to 4.",
+				},
 			},
 			DataSourcesMap: map[string]*schema.Resource{
 				"confluent_kafka_cluster":              kafkaDataSource(),
@@ -149,9 +154,7 @@ func New(version, userAgent string) func() *schema.Provider {
 				"confluent_private_link_access":        privateLinkAccessDataSource(),
 				"confluent_role_binding":               roleBindingDataSource(),
 				"confluent_service_account":            serviceAccountDataSource(),
-				"confluent_stream_governance_cluster":  streamGovernanceClusterDataSource(),
 				"confluent_schema_registry_cluster":    schemaRegistryClusterDataSource(),
-				"confluent_stream_governance_region":   streamGovernanceRegionDataSource(),
 				"confluent_schema_registry_region":     schemaRegistryRegionDataSource(),
 				"confluent_user":                       userDataSource(),
 			},
@@ -174,7 +177,6 @@ func New(version, userAgent string) func() *schema.Provider {
 				"confluent_peering":                    peeringResource(),
 				"confluent_private_link_access":        privateLinkAccessResource(),
 				"confluent_role_binding":               roleBindingResource(),
-				"confluent_stream_governance_cluster":  streamGovernanceClusterResource(),
 				"confluent_schema_registry_cluster":    schemaRegistryClusterResource(),
 				"confluent_transit_gateway_attachment": transitGatewayAttachmentResource(),
 			},
@@ -237,6 +239,8 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	kafkaApiKey := d.Get("kafka_api_key").(string)
 	kafkaApiSecret := d.Get("kafka_api_secret").(string)
 	kafkaRestEndpoint := d.Get("kafka_rest_endpoint").(string)
+	// If the max_retries doesn't exist in the configuration, then 0 will be returned.
+	maxRetries := d.Get("max_retries").(int)
 
 	// All 3 attributes should be set or not set at the same time
 	allKafkaAttributesAreSet := (kafkaApiKey != "") && (kafkaApiSecret != "") && (kafkaRestEndpoint != "")
@@ -260,7 +264,6 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	netCfg := net.NewConfiguration()
 	oidcCfg := oidc.NewConfiguration()
 	orgCfg := org.NewConfiguration()
-	sgCfg := sg.NewConfiguration()
 	srcmCfg := srcm.NewConfiguration()
 	ksqlCfg := ksql.NewConfiguration()
 	quotasCfg := quotas.NewConfiguration()
@@ -274,7 +277,6 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	netCfg.Servers[0].URL = endpoint
 	oidcCfg.Servers[0].URL = endpoint
 	orgCfg.Servers[0].URL = endpoint
-	sgCfg.Servers[0].URL = endpoint
 	srcmCfg.Servers[0].URL = endpoint
 	ksqlCfg.Servers[0].URL = endpoint
 	quotasCfg.Servers[0].URL = endpoint
@@ -288,30 +290,55 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	netCfg.UserAgent = userAgent
 	oidcCfg.UserAgent = userAgent
 	orgCfg.UserAgent = userAgent
-	sgCfg.UserAgent = userAgent
 	srcmCfg.UserAgent = userAgent
 	ksqlCfg.UserAgent = userAgent
 	quotasCfg.UserAgent = userAgent
 
-	apiKeysCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	cmkCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	// TODO: Uncomment once APIF-2660 is completed
-	// connectCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	iamCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	iamV1Cfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	mdsCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	netCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	oidcCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	orgCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	sgCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	srcmCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	ksqlCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
-	quotasCfg.HTTPClient = createRetryableHttpClientWithExponentialBackoff()
+	var kafkaRestClientFactory *KafkaRestClientFactory
 
-	// TODO: Delete once APIF-2660 is completed
-	tempConnectClient := createRetryableHttpClientWithExponentialBackoff()
-	tempConnectClient.Transport = &ItsActuallyJsonRoundTripper{tempConnectClient.Transport}
-	connectCfg.HTTPClient = tempConnectClient
+	if maxRetries != 0 {
+		kafkaRestClientFactory = &KafkaRestClientFactory{userAgent: userAgent, maxRetries: &maxRetries}
+
+		apiKeysCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		cmkCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		// TODO: Uncomment once APIF-2660 is completed
+		// connectCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		iamCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		iamV1Cfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		mdsCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		netCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		oidcCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		orgCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		srcmCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		ksqlCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		quotasCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+
+		// TODO: Delete once APIF-2660 is completed
+		tempConnectClient := NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		tempConnectClient.Transport = &ItsActuallyJsonRoundTripper{tempConnectClient.Transport}
+		connectCfg.HTTPClient = tempConnectClient
+	} else {
+		kafkaRestClientFactory = &KafkaRestClientFactory{userAgent: userAgent}
+
+		apiKeysCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		cmkCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		// TODO: Uncomment once APIF-2660 is completed
+		// connectCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		iamCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		iamV1Cfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		mdsCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		netCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		oidcCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		orgCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		srcmCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		ksqlCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		quotasCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+
+		// TODO: Delete once APIF-2660 is completed
+		tempConnectClient := NewRetryableClientFactory().CreateRetryableClient()
+		tempConnectClient.Transport = &ItsActuallyJsonRoundTripper{tempConnectClient.Transport}
+		connectCfg.HTTPClient = tempConnectClient
+	}
 
 	client := Client{
 		apiKeysClient:          apikeys.NewAPIClient(apiKeysCfg),
@@ -322,10 +349,9 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 		netClient:              net.NewAPIClient(netCfg),
 		oidcClient:             oidc.NewAPIClient(oidcCfg),
 		orgClient:              org.NewAPIClient(orgCfg),
-		sgClient:               sg.NewAPIClient(sgCfg),
 		srcmClient:             srcm.NewAPIClient(srcmCfg),
 		ksqlClient:             ksql.NewAPIClient(ksqlCfg),
-		kafkaRestClientFactory: &KafkaRestClientFactory{userAgent: userAgent},
+		kafkaRestClientFactory: kafkaRestClientFactory,
 		mdsClient:              mds.NewAPIClient(mdsCfg),
 		quotasClient:           quotas.NewAPIClient(quotasCfg),
 		userAgent:              userAgent,
