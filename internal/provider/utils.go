@@ -29,6 +29,7 @@ import (
 	mds "github.com/confluentinc/ccloud-sdk-go-v2/mds/v2"
 	net "github.com/confluentinc/ccloud-sdk-go-v2/networking/v1"
 	org "github.com/confluentinc/ccloud-sdk-go-v2/org/v2"
+	schemaregistry "github.com/confluentinc/ccloud-sdk-go-v2/schema-registry/v1"
 	srcm "github.com/confluentinc/ccloud-sdk-go-v2/srcm/v2"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -39,33 +40,40 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	crnKafkaSuffix                     = "/kafka="
-	kafkaAclLoggingKey                 = "kafka_acl_id"
-	kafkaClusterLoggingKey             = "kafka_cluster_id"
-	kafkaClusterConfigLoggingKey       = "kafka_cluster_config_id"
-	schemaRegistryClusterLoggingKey    = "schema_registry_cluster_id"
-	kafkaTopicLoggingKey               = "kafka_topic_id"
-	serviceAccountLoggingKey           = "service_account_id"
-	userLoggingKey                     = "user_id"
-	environmentLoggingKey              = "environment_id"
-	roleBindingLoggingKey              = "role_binding_id"
-	apiKeyLoggingKey                   = "api_key_id"
-	networkLoggingKey                  = "network_key_id"
-	connectorLoggingKey                = "connector_key_id"
-	privateLinkAccessLoggingKey        = "private_link_access_id"
-	peeringLoggingKey                  = "peering_id"
-	transitGatewayAttachmentLoggingKey = "transit_gateway_attachment_id"
-	ksqlClusterLoggingKey              = "ksql_cluster_id"
-	identityProviderLoggingKey         = "identity_provider_id"
-	identityPoolLoggingKey             = "identity_pool_id"
-	clusterLinkLoggingKey              = "cluster_link_id"
-	kafkaMirrorTopicLoggingKey         = "kafka_mirror_topic_id"
-	kafkaClientQuotaLoggingKey         = "kafka_client_quota_id"
+	crnKafkaSuffix                        = "/kafka="
+	kafkaAclLoggingKey                    = "kafka_acl_id"
+	kafkaClusterLoggingKey                = "kafka_cluster_id"
+	kafkaClusterConfigLoggingKey          = "kafka_cluster_config_id"
+	schemaRegistryClusterLoggingKey       = "schema_registry_cluster_id"
+	kafkaTopicLoggingKey                  = "kafka_topic_id"
+	serviceAccountLoggingKey              = "service_account_id"
+	userLoggingKey                        = "user_id"
+	environmentLoggingKey                 = "environment_id"
+	roleBindingLoggingKey                 = "role_binding_id"
+	apiKeyLoggingKey                      = "api_key_id"
+	networkLoggingKey                     = "network_key_id"
+	connectorLoggingKey                   = "connector_key_id"
+	privateLinkAccessLoggingKey           = "private_link_access_id"
+	peeringLoggingKey                     = "peering_id"
+	transitGatewayAttachmentLoggingKey    = "transit_gateway_attachment_id"
+	ksqlClusterLoggingKey                 = "ksql_cluster_id"
+	identityProviderLoggingKey            = "identity_provider_id"
+	identityPoolLoggingKey                = "identity_pool_id"
+	clusterLinkLoggingKey                 = "cluster_link_id"
+	kafkaMirrorTopicLoggingKey            = "kafka_mirror_topic_id"
+	kafkaClientQuotaLoggingKey            = "kafka_client_quota_id"
+	schemaLoggingKey                      = "schema_id"
+	subjectModeLoggingKey                 = "subject_mode_id"
+	subjectConfigLoggingKey               = "subject_config_id"
+	schemaRegistryClusterModeLoggingKey   = "schema_registry_cluster_mode_id"
+	schemaRegistryClusterConfigLoggingKey = "schema_registry_cluster_config_id"
 )
 
 func (c *Client) apiKeysApiContext(ctx context.Context) context.Context {
@@ -269,7 +277,17 @@ func getEnv(key, defaultValue string) string {
 }
 
 type KafkaRestClient struct {
-	apiClient                    *kafkarestv3.APIClient
+	apiClient                     *kafkarestv3.APIClient
+	clusterId                     string
+	clusterApiKey                 string
+	clusterApiSecret              string
+	restEndpoint                  string
+	isMetadataSetInProviderBlock  bool
+	isClusterIdSetInProviderBlock bool
+}
+
+type SchemaRegistryRestClient struct {
+	apiClient                    *schemaregistry.APIClient
 	clusterId                    string
 	clusterApiKey                string
 	clusterApiSecret             string
@@ -285,6 +303,17 @@ func (c *KafkaRestClient) apiContext(ctx context.Context) context.Context {
 		})
 	}
 	tflog.Warn(ctx, fmt.Sprintf("Could not find Kafka API Key for Kafka Cluster %q", c.clusterId), map[string]interface{}{kafkaClusterLoggingKey: c.clusterId})
+	return ctx
+}
+
+func (c *SchemaRegistryRestClient) apiContext(ctx context.Context) context.Context {
+	if c.clusterApiKey != "" && c.clusterApiSecret != "" {
+		return context.WithValue(context.Background(), schemaregistry.ContextBasicAuth, schemaregistry.BasicAuth{
+			UserName: c.clusterApiKey,
+			Password: c.clusterApiSecret,
+		})
+	}
+	tflog.Warn(ctx, fmt.Sprintf("Could not find Schema Registry API Key for Stream Governance Cluster %q", c.clusterId))
 	return ctx
 }
 
@@ -362,7 +391,12 @@ func isNonKafkaRestApiResourceNotFound(response *http.Response) bool {
 // APIF-2043: TEMPORARY METHOD
 // Converts principal with a resourceID (User:sa-01234) to principal with an integer ID (User:6789)
 func principalWithResourceIdToPrincipalWithIntegerId(c *Client, principalWithResourceId string) (string, error) {
-	// There's input validation that principal attribute must start with "User:sa-" or "User:u-"
+	// There's input validation that principal attribute must start with "User:sa-" or "User:u-" or "User:pool-"  or "User:*"
+
+	if principalWithResourceId == "User:*" {
+		return principalWithResourceId, nil
+	}
+
 	// User:sa-abc123 -> sa-abc123
 	resourceId := principalWithResourceId[5:]
 	if strings.HasPrefix(principalWithResourceId, "User:sa-") {
@@ -380,7 +414,7 @@ func principalWithResourceIdToPrincipalWithIntegerId(c *Client, principalWithRes
 	} else if strings.HasPrefix(principalWithResourceId, "User:pool-") {
 		return principalWithResourceId, nil
 	}
-	return "", fmt.Errorf("the principal must start with 'User:sa-' or 'User:u-' or 'User:pool-'")
+	return "", fmt.Errorf("the principal must start with 'User:sa-' or 'User:u-' or 'User:pool-' or 'User:*'")
 }
 
 // APIF-2043: TEMPORARY METHOD
@@ -509,7 +543,7 @@ func clusterSettingsKeysValidate(v interface{}, path cty.Path) diag.Diagnostics 
 		return diag.Errorf("error creating / updating Cluster Config: %q block should not be empty", paramConfigs)
 	}
 
-	for clusterSetting, _ := range clusterSettingsMap {
+	for clusterSetting := range clusterSettingsMap {
 		if !stringInSlice(clusterSetting, editableClusterSettings, false) {
 			return diag.Errorf("error creating / updating Cluster Config: %q cluster setting is read-only and cannot be updated. "+
 				"Read %s for more details.", clusterSetting, docsClusterConfigUrl)
@@ -521,11 +555,53 @@ func clusterSettingsKeysValidate(v interface{}, path cty.Path) diag.Diagnostics 
 func clusterLinkSettingsKeysValidate(v interface{}, path cty.Path) diag.Diagnostics {
 	clusterSettingsMap := v.(map[string]interface{})
 
-	for clusterSetting, _ := range clusterSettingsMap {
+	for clusterSetting := range clusterSettingsMap {
 		if !stringInSlice(clusterSetting, editableClusterLinkSettings, false) {
 			return diag.Errorf("error creating / updating Cluster Link: %q cluster link setting is read-only and cannot be updated. "+
 				"Read %s for more details.", clusterSetting, docsClusterLinkConfigUrl)
 		}
 	}
 	return nil
+}
+
+func compareTwoProtos(old, new interface{}) bool {
+	oldProtoLinesSlice := createProtoLinesSlice(protoToString(old))
+	newProtoLinesSlice := createProtoLinesSlice(protoToString(new))
+	sort.Strings(oldProtoLinesSlice)
+	sort.Strings(newProtoLinesSlice)
+	return reflect.DeepEqual(oldProtoLinesSlice, newProtoLinesSlice)
+}
+
+func createProtoLinesSlice(proto string) []string {
+	// Remove groups whitespaces with a single one
+	whitespaces := regexp.MustCompile(`\s+`)
+	proto = whitespaces.ReplaceAllString(proto, " ")
+	proto = strings.Replace(proto, " ;", ";", -1)
+
+	// Split by any of ;{}
+	proto = strings.Replace(proto, "}", "}\n", -1)
+	proto = strings.Replace(proto, "{", "{\n", -1)
+	proto = strings.Replace(proto, ";", ";\n", -1)
+
+	lines := strings.Split(proto, "\n")
+
+	filteredLines := make([]string, 0)
+	for _, line := range lines {
+		trimmedLine := strings.Trim(line, "\n\t ")
+		if trimmedLine == "" {
+			continue
+		}
+		filteredLines = append(filteredLines, trimmedLine)
+	}
+	return filteredLines
+}
+
+func protoToString(proto interface{}) string {
+	if proto == nil || proto.(string) == "" {
+		return ""
+	}
+
+	protoString := proto.(string)
+
+	return protoString
 }

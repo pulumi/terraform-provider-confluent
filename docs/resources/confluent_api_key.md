@@ -10,7 +10,7 @@ description: |-
 
 [![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
-`confluent_api_key` provides an API Key resource that enables creating, editing, and deleting Cloud API Keys and Kafka API Keys on Confluent Cloud.
+`confluent_api_key` provides an API Key resource that enables creating, editing, and deleting Cloud API Keys, Cluster API Keys (Kafka API Key, ksqlDB API Key, Schema Registry API Key) on Confluent Cloud.
 
 -> **Note:** It is recommended to set `lifecycle { prevent_destroy = true }` on production instances to prevent accidental API Key deletion. This setting rejects plans that would destroy or recreate the API Key, such as attempting to change uneditable attributes. Read more about it in the [Terraform docs](https://www.terraform.io/language/meta-arguments/lifecycle#prevent_destroy).
 
@@ -18,40 +18,6 @@ description: |-
 
 ### Example Kafka API Key
 ```terraform
-resource "confluent_environment" "staging" {
-  display_name = "Staging"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "confluent_kafka_cluster" "basic" {
-  display_name = "inventory"
-  availability = "SINGLE_ZONE"
-  cloud        = "AWS"
-  region       = "us-east-2"
-  basic {}
-  environment {
-    id = confluent_environment.staging.id
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "confluent_service_account" "app-manager" {
-  display_name = "app-manager"
-  description  = "Service account to manage 'inventory' Kafka cluster"
-}
-
-resource "confluent_role_binding" "app-manager-kafka-cluster-admin" {
-  principal   = "User:${confluent_service_account.app-manager.id}"
-  role_name   = "CloudClusterAdmin"
-  crn_pattern = confluent_kafka_cluster.basic.rbac_crn
-}
-
 resource "confluent_api_key" "app-manager-kafka-api-key" {
   display_name = "app-manager-kafka-api-key"
   description  = "Kafka API Key that is owned by 'app-manager' service account"
@@ -71,16 +37,59 @@ resource "confluent_api_key" "app-manager-kafka-api-key" {
     }
   }
 
-  # The goal is to ensure that confluent_role_binding.app-manager-kafka-cluster-admin is created before
-  # confluent_api_key.app-manager-kafka-api-key is used to create instances of
-  # confluent_kafka_topic, confluent_kafka_acl resources.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
 
-  # 'depends_on' meta-argument is specified in confluent_api_key.app-manager-kafka-api-key to avoid having
-  # multiple copies of this definition in the configuration which would happen if we specify it in
-  # confluent_kafka_topic, confluent_kafka_acl resources instead.
-  depends_on = [
-    confluent_role_binding.app-manager-kafka-cluster-admin
-  ]
+### Example ksqlDB API Key
+```terraform
+resource "confluent_api_key" "ksqldb-api-key" {
+  display_name = "ksqldb-api-key"
+  description  = "KsqlDB API Key that is owned by 'app-manager' service account"
+  owner {
+    id          = confluent_service_account.app-manager.id
+    api_version = confluent_service_account.app-manager.api_version
+    kind        = confluent_service_account.app-manager.kind
+  }
+
+  managed_resource {
+    id          = confluent_ksql_cluster.main.id
+    api_version = confluent_ksql_cluster.main.api_version
+    kind        = confluent_ksql_cluster.main.kind
+
+    environment {
+      id = confluent_environment.staging.id
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+### Example Schema Registry API Key
+```terraform
+resource "confluent_api_key" "env-manager-schema-registry-api-key" {
+  display_name = "env-manager-schema-registry-api-key"
+  description  = "Schema Registry API Key that is owned by 'env-manager' service account"
+  owner {
+    id          = confluent_service_account.env-manager.id
+    api_version = confluent_service_account.env-manager.api_version
+    kind        = confluent_service_account.env-manager.kind
+  }
+
+  managed_resource {
+    id          = confluent_schema_registry_cluster.essentials.id
+    api_version = confluent_schema_registry_cluster.essentials.api_version
+    kind        = confluent_schema_registry_cluster.essentials.kind
+
+    environment {
+      id = confluent_environment.staging.id
+    }
+  }
 
   lifecycle {
     prevent_destroy = true
@@ -90,25 +99,6 @@ resource "confluent_api_key" "app-manager-kafka-api-key" {
 
 ### Example Cloud API Key
 ```terraform
-resource "confluent_environment" "staging" {
-  display_name = "Staging"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "confluent_service_account" "env-manager" {
-  display_name = "env-manager"
-  description  = "Service account to manage resources under 'Staging' environment on Confluent Cloud"
-}
-
-resource "confluent_role_binding" "app-manager-env-admin" {
-  principal   = "User:${confluent_service_account.env-manager.id}"
-  role_name   = "EnvironmentAdmin"
-  crn_pattern = confluent_environment.staging.resource_name
-}
-
 resource "confluent_api_key" "env-manager-cloud-api-key" {
   display_name = "env-manager-cloud-api-key"
   description  = "Cloud API Key that is owned by 'env-manager' service account"
@@ -117,13 +107,6 @@ resource "confluent_api_key" "env-manager-cloud-api-key" {
     api_version = confluent_service_account.env-manager.api_version
     kind        = confluent_service_account.env-manager.kind
   }
-
-  # The goal is to ensure that confluent_role_binding.app-manager-env-admin is created before
-  # confluent_api_key.env-manager-cloud-api-key is used.
-
-  depends_on = [
-    confluent_role_binding.app-manager-env-admin
-  ]
 
   lifecycle {
     prevent_destroy = true
@@ -143,7 +126,7 @@ The following arguments are supported:
     - `id` - (Required String) The ID of the owner that the API Key belongs to, for example, `sa-abc123` or `u-abc123`.
     - `api_version` - (Required String) The API group and version of the owner that the API Key belongs to, for example, `iam/v2`.
     - `kind` - (Required String) The kind of the owner that the API Key belongs to, for example, `ServiceAccount` or `User`.
-- `managed_resource` (Optional Configuration Block) This block must be set for Kafka API Keys and must be omitted for Cloud API Keys. It supports the following:
+- `managed_resource` (Optional Configuration Block) This block must be set for Cluster API Keys and must be omitted for Cloud API Keys. It supports the following:
     - `id` - (Required String) The ID of the managed resource that the API Key associated with, for example, `lkc-abc123`.
     - `api_version` - (Required String) The API group and version of the managed resource that the API Key associated with, for example, `cmk/v2`.
     - `kind` - (Required String) The kind of the managed resource that the API Key associated with, for example, `Cluster`.
@@ -163,14 +146,14 @@ In addition to the preceding arguments, the following attributes are exported:
 
 -> **Note:** You must set the `API_KEY_SECRET` (`secret`) environment variable before importing an API Key.
 
-You can import a Kafka API Key by using the Environment ID and Kafka API Key ID in the format `<Environment ID>/<Kafka API Key ID>`, for example:
+You can import a Cluster API Key by using the Environment ID and Cluster API Key ID in the format `<Environment ID>/<Cluster API Key ID>`, for example:
 
 ```shell
 $ export CONFLUENT_CLOUD_API_KEY="<cloud_api_key>"
 $ export CONFLUENT_CLOUD_API_SECRET="<cloud_api_secret>"
 $ export API_KEY_SECRET="<api_key_secret>"
 
-# Option #1: Kafka API Key
+# Option #1: Cluster API Key
 $ terraform import confluent_api_key.example_kafka_api_key "env-abc123/UTT6WDRXX7FHD2GV"
 ```
 
@@ -190,6 +173,7 @@ $ terraform import confluent_api_key.example_cloud_api_key "4UEXOMMWIBE5KZQG"
 ## Getting Started
 The following end-to-end examples might help to get started with `confluent_api_key` resource:
   * [`basic-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/basic-kafka-acls): _Basic_ Kafka cluster with authorization using ACLs
+  * [`basic-kafka-acls-with-alias`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/basic-kafka-acls-with-alias): _Basic_ Kafka cluster with authorization using ACLs
   * [`standard-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/standard-kafka-acls): _Standard_ Kafka cluster with authorization using ACLs
   * [`standard-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/standard-kafka-rbac): _Standard_ Kafka cluster with authorization using RBAC
   * [`dedicated-public-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-public-kafka-acls): _Dedicated_ Kafka cluster that is accessible over the public internet with authorization using ACLs

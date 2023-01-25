@@ -27,6 +27,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -37,17 +38,21 @@ const (
 	serviceAccountKind   = "ServiceAccount"
 	userKind             = "User"
 	clusterKind          = "Cluster"
+	schemaRegistryKind   = "SchemaRegistry"
+	ksqlDbKind           = "ksqlDB"
 	cloudKindInLowercase = "cloud"
 
-	iamApiVersion = "iam/v2"
-	cmkApiVersion = "cmk/v2"
+	iamApiVersion      = "iam/v2"
+	cmkApiVersion      = "cmk/v2"
+	srcmApiVersion     = "srcm/v2"
+	ksqldbcmApiVersion = "ksqldbcm/v2"
 )
 
 var acceptedOwnerKinds = []string{serviceAccountKind, userKind}
 var acceptedResourceKinds = []string{clusterKind}
 
 var acceptedOwnerApiVersions = []string{iamApiVersion}
-var acceptedResourceApiVersions = []string{cmkApiVersion}
+var acceptedResourceApiVersions = []string{cmkApiVersion, srcmApiVersion, ksqldbcmApiVersion}
 
 func apiKeyResource() *schema.Resource {
 	return &schema.Resource{
@@ -294,10 +299,15 @@ func setOwner(apiKey apikeys.IamV2ApiKey, d *schema.ResourceData) error {
 
 func setManagedResource(apiKey apikeys.IamV2ApiKey, environmentId string, d *schema.ResourceData) error {
 	// Have to be careful here in case Schema Registry and ksqlDB don't use paramEnvironment
+	kind := apiKey.Spec.Resource.GetKind()
+	// Hack for API Key Mgmt API that temporarily returns schemaRegistryKind / ksqlDbKind instead of clusterKind
+	if kind == schemaRegistryKind || kind == ksqlDbKind {
+		kind = clusterKind
+	}
 	if environmentId != "" {
 		return d.Set(paramResource, []interface{}{map[string]interface{}{
 			paramId:         apiKey.Spec.Resource.GetId(),
-			paramKind:       apiKey.Spec.Resource.GetKind(),
+			paramKind:       kind,
 			paramApiVersion: apiKey.Spec.Resource.GetApiVersion(),
 			paramEnvironment: []interface{}{map[string]interface{}{
 				paramId: environmentId,
@@ -306,7 +316,7 @@ func setManagedResource(apiKey apikeys.IamV2ApiKey, environmentId string, d *sch
 	} else {
 		return d.Set(paramResource, []interface{}{map[string]interface{}{
 			paramId:         apiKey.Spec.Resource.GetId(),
-			paramKind:       apiKey.Spec.Resource.GetKind(),
+			paramKind:       kind,
 			paramApiVersion: apiKey.Spec.Resource.GetApiVersion(),
 		}})
 	}
@@ -361,7 +371,7 @@ func apiKeyResourceSchema() *schema.Schema {
 		// If the resource is not specified, then Cloud API Key gets created
 		Optional:    true,
 		ForceNew:    true,
-		Description: "The resource associated with this object. The only resource that is supported is 'cmk.v2.KafkaCluster'.",
+		Description: "The resource associated with this object. The only resource that is supported is 'cmk.v2.Cluster', 'srcm.v2.Cluster'.",
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				paramId: {
@@ -369,7 +379,7 @@ func apiKeyResourceSchema() *schema.Schema {
 					Required:     true,
 					ForceNew:     true,
 					Description:  "The unique identifier for the referred resource.",
-					ValidateFunc: validation.StringMatch(regexp.MustCompile("^lkc-"), "the resource ID must be of the form 'lkc-'"),
+					ValidateFunc: validation.StringMatch(regexp.MustCompile("^(lkc-|lsrc-|lksqlc-)"), "the resource ID must be of the form 'lkc-' or 'lsrc-' or 'lksqlc-'"),
 				},
 				paramKind: {
 					Type:         schema.TypeString,
@@ -397,10 +407,6 @@ func apiKeyResourceSchema() *schema.Schema {
 func extractStringValueFromBlock(d *schema.ResourceData, blockName string, attribute string) string {
 	// d.Get() will return "" if the key is not present
 	return d.Get(fmt.Sprintf("%s.0.%s", blockName, attribute)).(string)
-}
-
-func extractListOfStringsValueFromBlock(d *schema.ResourceData, blockName string, attribute string) []string {
-	return d.Get(fmt.Sprintf("%s.0.%s", blockName, attribute)).([]string)
 }
 
 func extractStringValueFromNestedBlock(d *schema.ResourceData, outerBlockName string, innerBlockName string, attribute string) string {
@@ -431,8 +437,31 @@ func fetchHttpEndpointOfKafkaCluster(ctx context.Context, c *Client, environment
 	}
 }
 
+// Send a GetCluster request to SRCM API to find out rest_endpoint for a given (environmentId, clusterId) pair
+func fetchHttpEndpointOfSchemaRegistryCluster(ctx context.Context, c *Client, environmentId, clusterId string) (string, error) {
+	cluster, _, err := executeSchemaRegistryClusterRead(c.srcmApiContext(ctx), c, environmentId, clusterId)
+	if err != nil {
+		return "", fmt.Errorf("error reading Schema Registry Cluster %q: %s", clusterId, createDescriptiveError(err))
+	}
+	if restEndpoint := cluster.Spec.GetHttpEndpoint(); len(restEndpoint) > 0 {
+		return restEndpoint, nil
+	} else {
+		return "", fmt.Errorf("rest_endpoint is nil or empty for Schema Registry Cluster %q", clusterId)
+	}
+}
+
 func isKafkaApiKey(apiKey apikeys.IamV2ApiKey) bool {
 	return apiKey.Spec.Resource.GetKind() == clusterKind && apiKey.Spec.Resource.GetApiVersion() == cmkApiVersion
+}
+
+func isSchemaRegistryApiKey(apiKey apikeys.IamV2ApiKey) bool {
+	// At the moment, API Key Mgmt API temporarily returns schemaRegistryKind instead of clusterKind
+	return (apiKey.Spec.Resource.GetKind() == clusterKind || apiKey.Spec.Resource.GetKind() == schemaRegistryKind) && apiKey.Spec.Resource.GetApiVersion() == srcmApiVersion
+}
+
+func isKsqlDbClusterApiKey(apiKey apikeys.IamV2ApiKey) bool {
+	// At the moment, API Key Mgmt API temporarily returns ksqlDbKind instead of clusterKind
+	return (apiKey.Spec.Resource.GetKind() == clusterKind || apiKey.Spec.Resource.GetKind() == ksqlDbKind) && apiKey.Spec.Resource.GetApiVersion() == ksqldbcmApiVersion
 }
 
 func waitForApiKeyToSync(ctx context.Context, c *Client, createdApiKey apikeys.IamV2ApiKey, isResourceSpecificApiKey bool, environmentId string) error {
@@ -446,10 +475,24 @@ func waitForApiKeyToSync(ctx context.Context, c *Client, createdApiKey apikeys.I
 			if err != nil {
 				return fmt.Errorf("error fetching Kafka Cluster %q's %q attribute: %s", clusterId, paramRestEndpoint, createDescriptiveError(err))
 			}
-			kafkaRestClient := c.kafkaRestClientFactory.CreateKafkaRestClient(restEndpoint, clusterId, createdApiKey.GetId(), createdApiKey.Spec.GetSecret(), false)
+			kafkaRestClient := c.kafkaRestClientFactory.CreateKafkaRestClient(restEndpoint, clusterId, createdApiKey.GetId(), createdApiKey.Spec.GetSecret(), false, false)
 			if err := waitForCreatedKafkaApiKeyToSync(ctx, kafkaRestClient); err != nil {
 				return fmt.Errorf("error waiting for Kafka API Key %q to sync: %s", createdApiKey.GetId(), createDescriptiveError(err))
 			}
+		} else if isSchemaRegistryApiKey(createdApiKey) {
+			clusterId := createdApiKey.Spec.Resource.GetId()
+			restEndpoint, err := fetchHttpEndpointOfSchemaRegistryCluster(ctx, c, environmentId, clusterId)
+			if err != nil {
+				return fmt.Errorf("error fetching Schema Registry Cluster %q's %q attribute: %s", clusterId, paramRestEndpoint, createDescriptiveError(err))
+			}
+			schemaRegistryRestClient := c.schemaRegistryRestClientFactory.CreateSchemaRegistryRestClient(restEndpoint, clusterId, createdApiKey.GetId(), createdApiKey.Spec.GetSecret(), false)
+			if err := waitForCreatedSchemaRegistryApiKeyToSync(ctx, schemaRegistryRestClient); err != nil {
+				return fmt.Errorf("error waiting for Schema Registry API Key %q to sync: %s", createdApiKey.GetId(), createDescriptiveError(err))
+			}
+		} else if isKsqlDbClusterApiKey(createdApiKey) {
+			// Currently, there are no data plane API for ksqlDB clusters so there is no endpoint we could leverage
+			// to check whether the Cluster API Key is synced which is why we're adding time.Sleep() here.
+			time.Sleep(5 * time.Minute)
 		} else {
 			resourceJson, err := json.Marshal(createdApiKey.Spec.GetResource())
 			if err != nil {
@@ -474,16 +517,16 @@ func apiKeyImport(ctx context.Context, d *schema.ResourceData, meta interface{})
 		return nil, fmt.Errorf("error importing API Key %q: API_KEY_SECRET environment variable is empty but it must be set", d.Id())
 	}
 
-	envIdAndKafkaAPIKeyId := d.Id()
-	parts := strings.Split(envIdAndKafkaAPIKeyId, "/")
+	envIdAndClusterAPIKeyId := d.Id()
+	parts := strings.Split(envIdAndClusterAPIKeyId, "/")
 	if len(parts) == 1 {
 		tflog.Debug(ctx, fmt.Sprintf("Importing Cloud API Key %q", d.Id()), map[string]interface{}{apiKeyLoggingKey: d.Id()})
 	} else if len(parts) == 2 {
 		environmentId := parts[0]
-		kafkaApiKeyId := parts[1]
+		clusterApiKeyId := parts[1]
 
-		d.SetId(kafkaApiKeyId)
-		// Preset environmentId when importing Kafka API Key
+		d.SetId(clusterApiKeyId)
+		// Preset environmentId when importing Cluster API Key
 		if err := d.Set(paramResource, []interface{}{map[string]interface{}{
 			paramEnvironment: []interface{}{map[string]interface{}{
 				paramId: environmentId,
@@ -492,9 +535,9 @@ func apiKeyImport(ctx context.Context, d *schema.ResourceData, meta interface{})
 			return nil, createDescriptiveError(err)
 		}
 
-		tflog.Debug(ctx, fmt.Sprintf("Importing Kafka API Key %q", d.Id()), map[string]interface{}{apiKeyLoggingKey: d.Id()})
+		tflog.Debug(ctx, fmt.Sprintf("Importing Cluster API Key %q", d.Id()), map[string]interface{}{apiKeyLoggingKey: d.Id()})
 	} else {
-		return nil, fmt.Errorf("error importing API Key: invalid format: expected '<API Key ID> for Cloud API Key or <env ID>/<topic name>' for Kafka API Key")
+		return nil, fmt.Errorf("error importing API Key: invalid format: expected '<API Key ID> for Cloud API Key or <env ID>/API Key ID>' for Cluster API Key")
 	}
 
 	// Mark resource as new to avoid d.Set("") when getting 404

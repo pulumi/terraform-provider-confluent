@@ -101,7 +101,7 @@ func kafkaStateUpgradeV0(ctx context.Context, rawState map[string]interface{}, m
 func kafkaAclResourceV1() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
-			paramKafkaCluster: kafkaClusterBlockSchema(),
+			paramKafkaCluster: requiredKafkaClusterBlockSchema(),
 			paramResourceType: {
 				Type:         schema.TypeString,
 				Required:     true,
@@ -127,7 +127,7 @@ func kafkaAclResourceV1() *schema.Resource {
 				Required:     true,
 				ForceNew:     true,
 				Description:  "The principal for the ACL.",
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^User:(sa|u|pool)-"), "the principal must start with 'User:sa-' or 'User:u-' or 'User:pool-'."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile("^User:(\\*)$|^User:(sa|u|pool)-"), "the principal must start with 'User:sa-' or 'User:u-' or 'User:pool-' or 'User:*'."),
 			},
 			paramHost: {
 				Type:        schema.TypeString,
@@ -164,7 +164,7 @@ func kafkaAclResourceV1() *schema.Resource {
 func kafkaTopicResourceV1() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
-			paramKafkaCluster: kafkaClusterBlockSchema(),
+			paramKafkaCluster: requiredKafkaClusterBlockSchema(),
 			paramTopicName: {
 				Type:         schema.TypeString,
 				Required:     true,

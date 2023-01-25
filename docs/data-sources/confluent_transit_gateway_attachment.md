@@ -8,10 +8,7 @@ description: |-
 
 # confluent_transit_gateway_attachment Data Source
 
-[![Early Access](https://img.shields.io/badge/Lifecycle%20Stage-Early%20Access-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy) [![Request Access To Networking v1](https://img.shields.io/badge/-Request%20Access%20To%20Networking%20v1-%23bc8540)](mailto:ccloud-api-access+networking-v1-early-access@confluent.io?subject=Request%20to%20join%20networking/v1%20API%20Early%20Access&body=I%E2%80%99d%20like%20to%20join%20the%20Confluent%20Cloud%20API%20Early%20Access%20for%20networking/v1%20to%20provide%20early%20feedback%21%20My%20Cloud%20Organization%20ID%20is%20%3Cretrieve%20from%20https%3A//confluent.cloud/settings/billing/payment%3E.)
-
--> **Note:** `confluent_transit_gateway_attachment` data source is available in **Early Access** for early adopters. Early Access features are introduced to gather customer feedback. This feature should be used only for evaluation and non-production testing purposes or to provide feedback to Confluent, particularly as it becomes more widely available in follow-on editions.  
-**Early Access** features are intended for evaluation use in development and testing environments only, and not for production use. The warranty, SLA, and Support Services provisions of your agreement with Confluent do not apply to Early Access features. Early Access features are considered to be a Proof of Concept as defined in the Confluent Cloud Terms of Service. Confluent may discontinue providing preview releases of the Early Access features at any time in Confluent’s sole discretion.
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy)
 
 `confluent_transit_gateway_attachment` describes a Transit Gateway Attachment data source.
 
@@ -64,7 +61,6 @@ In addition to the preceding arguments, the following attributes are exported:
   - `ram_resource_share_arn` - (Required String) The Amazon Resource Name (ARN) of the Resource Access Manager (RAM) Resource Share of the transit gateway your Confluent Cloud network attaches to.
   - `transit_gateway_id` - (Required String) The ID of the AWS Transit Gateway that you want Confluent CLoud to be attached to. Must start with `tgw-`.
   - `routes` - (Required List of String) List of destination routes for traffic from Confluent VPC to customer VPC via Transit Gateway.
-  - `enable_custom_routes` - (Required String) Enable custom destination routes in Confluent Cloud. Defaults to `false`.
   - `transit_gateway_attachment_id` - (Required String) The ID of the AWS Transit Gateway VPC Attachment that attaches Confluent VPC to Transit Gateway.
 
 -> **Note:** Use the `aws[0]` prefix for referencing these attributes, for example, `data.confluent_transit_gateway_attachment.example_using_name.aws[0].routes`.

@@ -7,7 +7,7 @@ terraform {
     }
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.19.0"
+      version = "1.25.0"
     }
   }
 }
@@ -298,7 +298,7 @@ provider "aws" {
 }
 
 locals {
-  hosted_zone = replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0], "glb.", "")
+  hosted_zone = length(regexall(".glb", confluent_kafka_cluster.dedicated.bootstrap_endpoint)) > 0 ? replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0], "glb.", "") : regex("[.]([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0]
 }
 
 data "aws_vpc" "privatelink" {

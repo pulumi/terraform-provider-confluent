@@ -260,7 +260,7 @@ func TestAccTopic(t *testing.T) {
 }
 
 func testAccCheckTopicDestroy(s *terraform.State) error {
-	c := testAccProvider.Meta().(*Client).kafkaRestClientFactory.CreateKafkaRestClient(mockTopicTestServerUrl, clusterId, kafkaApiKey, kafkaApiSecret, false)
+	c := testAccProvider.Meta().(*Client).kafkaRestClientFactory.CreateKafkaRestClient(mockTopicTestServerUrl, clusterId, kafkaApiKey, kafkaApiSecret, false, false)
 	// Loop through the resources in state, verifying each Kafka topic is destroyed
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "confluent_kafka_topic" {

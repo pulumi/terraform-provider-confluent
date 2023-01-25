@@ -185,10 +185,6 @@ func awsTransitGatewayAttachmentDataSourceSchema() *schema.Schema {
 					Computed:    true,
 					Description: "The ID of the AWS Transit Gateway that your Confluent Cloud network attaches to.",
 				},
-				paramEnableCustomRoutes: {
-					Type:     schema.TypeBool,
-					Computed: true,
-				},
 				paramRoutes: {
 					Type:        schema.TypeList,
 					Computed:    true,

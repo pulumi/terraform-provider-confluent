@@ -62,14 +62,14 @@ func kafkaClientQuotaResource() *schema.Resource {
 				Description:  "A description of the Kafka Client Quota.",
 				ValidateFunc: validation.StringIsNotEmpty,
 			},
-			paramKafkaCluster: kafkaClusterBlockSchema(),
+			paramKafkaCluster: requiredKafkaClusterBlockSchema(),
 			paramEnvironment:  environmentSchema(),
 			paramPrincipals: {
 				Type:        schema.TypeSet,
 				Elem:        &schema.Schema{Type: schema.TypeString},
 				MinItems:    1,
 				Required:    true,
-				Description: "A list of service accounts. Special name \"default\" can be used to represent the default quota for all users and service accounts.",
+				Description: "A list of service accounts and identity pools. Special name \"default\" can be used to represent the default quota for all users and service accounts.",
 			},
 			paramThroughput: throughputSchema(),
 		},
@@ -326,7 +326,7 @@ func convertToListOfIds(globalObjectReferences []quotas.GlobalObjectReference) [
 func convertSetToStringList(d *schema.ResourceData, attributeName string) []string {
 	setValues := d.Get(attributeName).(*schema.Set).List()
 	stringSetValues := make([]string, len(setValues))
-	for i, _ := range setValues {
+	for i := range setValues {
 		stringSetValues[i] = setValues[i].(string)
 	}
 	return stringSetValues

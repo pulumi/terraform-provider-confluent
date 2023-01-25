@@ -62,10 +62,18 @@ In addition to the preceding arguments, the following attributes are exported:
 - `cidr` - (Required String) The IPv4 CIDR block to used for the network. Must be `/16`. Required for VPC peering and AWS TransitGateway.
 - `connection_types` - (Required List of String) The list of connection types that may be used with the network. Accepted connection types are: `PEERING`, `TRANSITGATEWAY`, and `PRIVATELINK`.
 - `zones` - (Optional List of String) The 3 availability zones for this network. They can optionally be specified for AWS networks
-  used with Private Link. Otherwise, they are automatically chosen by Confluent Cloud.
+  used with PrivateLink, for GCP networks used with Private Service Connect, and for AWS and GCP
+  networks used with Peering. Otherwise, they are automatically chosen by Confluent Cloud.
   On AWS, zones are AWS [AZ IDs](https://docs.aws.amazon.com/ram/latest/userguide/working-with-az-ids.html), for example, `use1-az3`.
   On GCP, zones are GCP [zones](https://cloud.google.com/compute/docs/regions-zones), for example, `us-central1-c`.
   On Azure, zones are Confluent-chosen names (for example, `1`, `2`, `3`) since Azure does not have universal zone identifiers.
+- `dns_config` (Optional Configuration Block) Network DNS config. It applies only to the PRIVATELINK network connection type. It supports the following:
+  - `resolution` - (Required String) Network DNS resolution.
+    When resolution is `CHASED_PRIVATE`, clusters in this network require both public and private DNS to resolve cluster endpoints.
+    When resolution is `PRIVATE`, clusters in this network only require private DNS to resolve cluster endpoints.
+
+-> **Note:** The `dns_config` configuration block is in an [Early Access lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy), and it's available only for AWS networks with PRIVATELINK connection type.
+
 - `resource_name` - (Required String) The Confluent Resource Name of the Network.
 - `aws` - (Optional Configuration Block) The AWS-specific network details if available. It supports the following:
   - `vpc` - (Required String) The Confluent Cloud VPC ID.

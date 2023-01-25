@@ -37,6 +37,8 @@ const (
 	paramPrivateLinkServiceAliases               = "private_link_service_aliases"
 	paramPrivateServiceConnectServiceAttachments = "private_service_connect_service_attachments"
 	paramDnsDomain                               = "dns_domain"
+	paramDnsConfig                               = "dns_config"
+	paramResolution                              = "resolution"
 	paramZonalSubdomains                         = "zonal_subdomains"
 
 	connectionTypePrivateLink    = "PRIVATELINK"
@@ -89,6 +91,7 @@ func networkResource() *schema.Resource {
 				ForceNew:     true,
 			},
 			paramZones:       zonesSchema(),
+			paramDnsConfig:   optionalDnsConfigSchema(),
 			paramEnvironment: environmentSchema(),
 			paramResourceName: {
 				Type:        schema.TypeString,
@@ -219,6 +222,7 @@ func networkCreate(ctx context.Context, d *schema.ResourceData, meta interface{}
 	}
 
 	environmentId := extractStringValueFromBlock(d, paramEnvironment, paramId)
+	resolution := extractStringValueFromBlock(d, paramDnsConfig, paramResolution)
 
 	spec := net.NewNetworkingV1NetworkSpec()
 	if displayName != "" {
@@ -236,6 +240,9 @@ func networkCreate(ctx context.Context, d *schema.ResourceData, meta interface{}
 		spec.SetZones(zones)
 	}
 	spec.SetEnvironment(net.ObjectReference{Id: environmentId})
+	if resolution != "" {
+		spec.SetDnsConfig(net.NetworkingV1DnsConfig{Resolution: resolution})
+	}
 
 	createNetworkRequest := net.NetworkingV1Network{Spec: spec}
 	createNetworkRequestJson, err := json.Marshal(createNetworkRequest)
@@ -372,6 +379,9 @@ func setNetworkAttributes(d *schema.ResourceData, network net.NetworkingV1Networ
 	if err := d.Set(paramResourceName, network.Metadata.GetResourceName()); err != nil {
 		return nil, createDescriptiveError(err)
 	}
+	if err := setStringAttributeInListBlockOfSizeOne(paramDnsConfig, paramResolution, network.Spec.DnsConfig.GetResolution(), d); err != nil {
+		return nil, err
+	}
 	d.SetId(network.GetId())
 	return d, nil
 }
@@ -494,10 +504,10 @@ func validateCidr(cidr, cloud string, connectionTypes []string) error {
 
 // zones can only be specified for AWS networks used with PrivateLink or TransitGateway or for GCP networks used with Private Service Connect
 func validateZones(zones []string, cloud string, connectionTypes []string) error {
-	isAwsPrivateLinkOrAwsTransitGateway := (cloud == strings.ToUpper(paramAws)) && (stringInSlice(connectionTypePrivateLink, connectionTypes, false) || stringInSlice(connectionTypeTransitGateway, connectionTypes, false))
-	gcpPrivateServiceConnect := (cloud == strings.ToUpper(paramGcp)) && stringInSlice(connectionTypePrivateLink, connectionTypes, false)
-	if len(zones) > 0 && !(isAwsPrivateLinkOrAwsTransitGateway || gcpPrivateServiceConnect) {
-		return fmt.Errorf("zones can only be specified for AWS networks used with PrivateLink or TransitGateway or for GCP networks used with Private Service Connect")
+	isAwsPrivateLinkOrAwsTransitGatewayOrAwsPeering := (cloud == strings.ToUpper(paramAws)) && (stringInSlice(connectionTypePrivateLink, connectionTypes, false) || stringInSlice(connectionTypeTransitGateway, connectionTypes, false) || stringInSlice(connectionTypePeering, connectionTypes, false))
+	gcpPrivateServiceConnectOrGcpPeering := (cloud == strings.ToUpper(paramGcp)) && (stringInSlice(connectionTypePrivateLink, connectionTypes, false) || stringInSlice(connectionTypePeering, connectionTypes, false))
+	if len(zones) > 0 && !(isAwsPrivateLinkOrAwsTransitGatewayOrAwsPeering || gcpPrivateServiceConnectOrGcpPeering) {
+		return fmt.Errorf("zones can only be specified for AWS networks used with PrivateLink or Peering or TransitGateway or for GCP networks used with Private Service Connect or Peering")
 	}
 	return nil
 }
@@ -516,4 +526,25 @@ func readZones(d *schema.ResourceData, cloud string, connectionTypes []string) (
 		return nil, err
 	}
 	return zones, nil
+}
+
+func optionalDnsConfigSchema() *schema.Schema {
+	return &schema.Schema{
+		Type:        schema.TypeList,
+		MinItems:    1,
+		MaxItems:    1,
+		Optional:    true,
+		Computed:    true,
+		Description: "Network DNS config. It applies only to the PRIVATELINK network connection type.",
+		Elem: &schema.Resource{
+			Schema: map[string]*schema.Schema{
+				paramResolution: {
+					Type:        schema.TypeString,
+					Required:    true,
+					ForceNew:    true,
+					Description: "Network DNS resolution.",
+				},
+			},
+		},
+	}
 }

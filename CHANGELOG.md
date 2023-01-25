@@ -1,3 +1,95 @@
+## 1.25.0 (January 19, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.24.0...v1.25.0)
+
+**New features:**
+* Added new optional `dns_config` block to `confluent_network` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_network) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_network) in an [Early Access lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+* Added **7** new examples for `confluent_connector` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_connector):
+  * [s3-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/s3-sink-connector)
+  * [snowflake-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/snowflake-sink-connector)
+  * [elasticsearch-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/elasticsearch-sink-connector)
+  * [dynamo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dynamo-db-sink-connector)
+  * [mongo-db-source-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/mongo-db-source-connector)
+  * [mongo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/mongo-db-sink-connector)
+  * [dynamo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dynamo-db-sink-connector)
+
+**Bug fixes:**
+* Added support for `zones` attribute for `confluent_network` of type `PEERING`.
+
+## 1.24.0 (January 5, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.23.0...v1.24.0)
+
+**New features:**
+* Added new `confluent_subject_mode` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_subject_mode) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_subject_mode) in an [Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy) ([#155](https://github.com/confluentinc/terraform-provider-confluent/issues/155)).
+* Added new `confluent_subject_config` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_subject_config) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_subject_config) in an [Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+* Added new `confluent_schema_registry_cluster_mode` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema_registry_cluster_mode) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_schema_registry_cluster_mode) in an [Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy) ([#155](https://github.com/confluentinc/terraform-provider-confluent/issues/155)).
+* Added new `confluent_schema_registry_cluster_config` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema_registry_cluster_config) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_schema_registry_cluster_config) in an [Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+* Added support for `kafka_id` attribute in the `provider` block ([#37](https://github.com/confluentinc/terraform-provider-confluent/issues/37#issuecomment-1169098579)). See [managing-single-kafka-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-kafka-cluster) example for more details.
+* Added support for `schema_registry_id` attribute in the `provider` block ([#124](https://github.com/confluentinc/terraform-provider-confluent/issues/124#issuecomment-1339650088)). See [managing-single-schema-registry-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-schema-registry-cluster) example for more details.
+* Added new examples:
+  * [managing-single-kafka-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-kafka-cluster)
+  * [managing-single-schema-registry-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-schema-registry-cluster)
+  * [basic-kafka-acls-with-alias](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/basic-kafka-acls-with-alias)
+  * [single-event-types-proto-schema-with-alias](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/single-event-types-proto-schema-with-alias)
+
+**Bug fixes:**
+* Fixed "confluent_kafka_acl resource does not allow use as principal 'User:*'" ([#152](https://github.com/confluentinc/terraform-provider-confluent/issues/152)).
+* Resolved 4 Dependabot alerts.
+* Fixed a bug in [ksql-rbac](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/ksql-rbac) example.
+* Updated [dedicated-privatelink-azure-kafka-acls](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-privatelink-azure-kafka-acls), [dedicated-privatelink-azure-kafka-rbac](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-privatelink-azure-kafka-rbac) examples to remove check for _disabled [Private Link endpoint network policies](https://docs.microsoft.com/en-us/azure/private-link/disable-private-endpoint-network-policy)_.
+* Updated docs ([#160](https://github.com/confluentinc/terraform-provider-confluent/issues/160), [#161](https://github.com/confluentinc/terraform-provider-confluent/issues/161)).
+
+## 1.23.0 (December 16, 2022)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.22.0...v1.23.0)
+
+**New features:**
+* Updated `confluent_api_key` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_api_key) to support ksqlDB API Keys.
+
+**Bug fixes:**
+* Updated docs.
+* Updated examples.
+
+## 1.22.0 (December 15, 2022)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.21.0...v1.22.0)
+
+**New features:**
+* Added new `confluent_identity_provider` and `confluent_identity_pool` resources and data sources in a [Generally Available lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+* Updated `confluent_api_key` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_api_key) to support Schema Registry API Keys.
+
+**Bug fixes:**
+* Updated docs.
+* Updated examples.
+
+## 1.21.0 (December 8, 2022)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.20.0...v1.21.0)
+
+**New features:**
+* Added new `confluent_transit_gateway_attachment` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_transit_gateway_attachment) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_transit_gateway_attachment) in a [Generally Available lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+* Added new `confluent_kafka_client_quota` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_client_quota) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_kafka_client_quota) in a [Generally Available lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+
+**Bug fixes:**
+* Updated docs.
+
+**New updates for resources that are in [Early Access / Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy):**
+* Updated `confluent_transit_gateway_attachment`: The `enable_custom_routes` attribute has been removed. The`routes` attribute is required now.
+
+## 1.20.0 (December 5, 2022)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.19.0...v1.20.0)
+
+**New features:**
+* Added new `confluent_schema` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_schema) in an [Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+
+**Bug fixes:**
+* Updated docs.
+
+**New updates for resources that are in [Early Access / Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy):**
+* Updated `confluent_transit_gateway_attachment`: The `enable_custom_routes` attribute has been deprecated. The `enable_custom_routes` attribute will be removed in the next release and `routes` attribute will be made required.
+
 ## 1.19.0 (December 1, 2022)
 
 [Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.18.0...v1.19.0)
@@ -228,7 +320,7 @@ examples to use `zones` attribute of `confluent_network` [resource](https://regi
 * Added support for pausing / resuming a connector by adding `status` attribute for `confluent_connector` resource.
 
 **Bug fixes:**
-* Updated docs and added a new [managing-single-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-cluster) example.
+* Updated docs and added a new [managing-single-kafka-cluster](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/managing-single-kafka-cluster) example.
 
 ## 0.12.0 (June 27, 2022)
 

@@ -7,7 +7,7 @@ terraform {
     }
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.19.0"
+      version = "1.25.0"
     }
   }
 }
@@ -229,7 +229,7 @@ resource "confluent_api_key" "app-producer-kafka-api-key" {
 
 // Note that in order to consume from a topic, the principal of the consumer ('app-consumer' service account)
 // needs to be authorized to perform 'READ' operation on both Topic and Group resources:
-resource "confluent_role_binding" "app-producer-developer-read-from-topic" {
+resource "confluent_role_binding" "app-consumer-developer-read-from-topic" {
   principal   = "User:${confluent_service_account.app-consumer.id}"
   role_name   = "DeveloperRead"
   crn_pattern = "${confluent_kafka_cluster.dedicated.rbac_crn}/kafka=${confluent_kafka_cluster.dedicated.id}/topic=${confluent_kafka_topic.orders.topic_name}"
@@ -252,7 +252,7 @@ provider "aws" {
 }
 
 locals {
-  hosted_zone = replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0], "glb.", "")
+  hosted_zone = length(regexall(".glb", confluent_kafka_cluster.dedicated.bootstrap_endpoint)) > 0 ? replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0], "glb.", "") : regex("[.]([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0]
 }
 
 data "aws_vpc" "privatelink" {

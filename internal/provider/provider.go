@@ -47,32 +47,41 @@ const (
 	paramEnvironment = "environment"
 	paramId          = "id"
 	paramDisplayName = "display_name"
+	paramName        = "name"
 	paramDescription = "description"
 	paramKind        = "kind"
 	paramCsu         = "csu"
 )
 
 type Client struct {
-	apiKeysClient          *apikeys.APIClient
-	iamClient              *iam.APIClient
-	iamV1Client            *iamv1.APIClient
-	cmkClient              *cmk.APIClient
-	connectClient          *connect.APIClient
-	netClient              *net.APIClient
-	orgClient              *org.APIClient
-	ksqlClient             *ksql.APIClient
-	kafkaRestClientFactory *KafkaRestClientFactory
-	mdsClient              *mds.APIClient
-	oidcClient             *oidc.APIClient
-	quotasClient           *quotas.APIClient
-	srcmClient             *srcm.APIClient
-	userAgent              string
-	cloudApiKey            string
-	cloudApiSecret         string
-	kafkaApiKey            string
-	kafkaApiSecret         string
-	kafkaRestEndpoint      string
-	isKafkaMetadataSet     bool
+	apiKeysClient                   *apikeys.APIClient
+	iamClient                       *iam.APIClient
+	iamV1Client                     *iamv1.APIClient
+	cmkClient                       *cmk.APIClient
+	connectClient                   *connect.APIClient
+	netClient                       *net.APIClient
+	orgClient                       *org.APIClient
+	ksqlClient                      *ksql.APIClient
+	kafkaRestClientFactory          *KafkaRestClientFactory
+	schemaRegistryRestClientFactory *SchemaRegistryRestClientFactory
+	mdsClient                       *mds.APIClient
+	oidcClient                      *oidc.APIClient
+	quotasClient                    *quotas.APIClient
+	srcmClient                      *srcm.APIClient
+	userAgent                       string
+	cloudApiKey                     string
+	cloudApiSecret                  string
+	kafkaClusterId                  string
+	kafkaApiKey                     string
+	kafkaApiSecret                  string
+	kafkaRestEndpoint               string
+	isKafkaClusterIdSet             bool
+	isKafkaMetadataSet              bool
+	schemaRegistryClusterId         string
+	schemaRegistryApiKey            string
+	schemaRegistryApiSecret         string
+	schemaRegistryRestEndpoint      string
+	isSchemaRegistryMetadataSet     bool
 }
 
 // Customize configs for terraform-plugin-docs
@@ -106,6 +115,12 @@ func New(version, userAgent string) func() *schema.Provider {
 					DefaultFunc: schema.EnvDefaultFunc("CONFLUENT_CLOUD_API_SECRET", ""),
 					Description: "The Confluent Cloud API Secret.",
 				},
+				"kafka_id": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					DefaultFunc: schema.EnvDefaultFunc("KAFKA_ID", ""),
+					Description: "The Kafka Cluster ID.",
+				},
 				"kafka_api_key": {
 					Type:        schema.TypeString,
 					Optional:    true,
@@ -126,6 +141,32 @@ func New(version, userAgent string) func() *schema.Provider {
 					DefaultFunc: schema.EnvDefaultFunc("KAFKA_REST_ENDPOINT", ""),
 					Description: "The Kafka Cluster REST Endpoint.",
 				},
+				"schema_registry_id": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					DefaultFunc: schema.EnvDefaultFunc("SCHEMA_REGISTRY_ID", ""),
+					Description: "The Schema Registry Cluster ID.",
+				},
+				"schema_registry_api_key": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Sensitive:   true,
+					DefaultFunc: schema.EnvDefaultFunc("SCHEMA_REGISTRY_API_KEY", ""),
+					Description: "The Schema Registry Cluster API Key.",
+				},
+				"schema_registry_api_secret": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Sensitive:   true,
+					DefaultFunc: schema.EnvDefaultFunc("SCHEMA_REGISTRY_API_SECRET", ""),
+					Description: "The Schema Registry Cluster API Secret.",
+				},
+				"schema_registry_rest_endpoint": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					DefaultFunc: schema.EnvDefaultFunc("SCHEMA_REGISTRY_REST_ENDPOINT", ""),
+					Description: "The Schema Registry Cluster REST Endpoint.",
+				},
 				"endpoint": {
 					Type:        schema.TypeString,
 					Optional:    true,
@@ -140,45 +181,55 @@ func New(version, userAgent string) func() *schema.Provider {
 				},
 			},
 			DataSourcesMap: map[string]*schema.Resource{
-				"confluent_kafka_cluster":              kafkaDataSource(),
-				"confluent_kafka_topic":                kafkaTopicDataSource(),
-				"confluent_environment":                environmentDataSource(),
-				"confluent_ksql_cluster":               ksqlDataSource(),
-				"confluent_identity_pool":              identityPoolDataSource(),
-				"confluent_identity_provider":          identityProviderDataSource(),
-				"confluent_kafka_client_quota":         kafkaClientQuotaDataSource(),
-				"confluent_network":                    networkDataSource(),
-				"confluent_organization":               organizationDataSource(),
-				"confluent_peering":                    peeringDataSource(),
-				"confluent_transit_gateway_attachment": transitGatewayAttachmentDataSource(),
-				"confluent_private_link_access":        privateLinkAccessDataSource(),
-				"confluent_role_binding":               roleBindingDataSource(),
-				"confluent_service_account":            serviceAccountDataSource(),
-				"confluent_schema_registry_cluster":    schemaRegistryClusterDataSource(),
-				"confluent_schema_registry_region":     schemaRegistryRegionDataSource(),
-				"confluent_user":                       userDataSource(),
+				"confluent_kafka_cluster":                  kafkaDataSource(),
+				"confluent_kafka_topic":                    kafkaTopicDataSource(),
+				"confluent_environment":                    environmentDataSource(),
+				"confluent_ksql_cluster":                   ksqlDataSource(),
+				"confluent_identity_pool":                  identityPoolDataSource(),
+				"confluent_identity_provider":              identityProviderDataSource(),
+				"confluent_kafka_client_quota":             kafkaClientQuotaDataSource(),
+				"confluent_network":                        networkDataSource(),
+				"confluent_organization":                   organizationDataSource(),
+				"confluent_peering":                        peeringDataSource(),
+				"confluent_transit_gateway_attachment":     transitGatewayAttachmentDataSource(),
+				"confluent_private_link_access":            privateLinkAccessDataSource(),
+				"confluent_role_binding":                   roleBindingDataSource(),
+				"confluent_schema":                         schemaDataSource(),
+				"confluent_service_account":                serviceAccountDataSource(),
+				"confluent_schema_registry_cluster":        schemaRegistryClusterDataSource(),
+				"confluent_schema_registry_region":         schemaRegistryRegionDataSource(),
+				"confluent_subject_mode":                   subjectModeDataSource(),
+				"confluent_subject_config":                 subjectConfigDataSource(),
+				"confluent_schema_registry_cluster_config": schemaRegistryClusterConfigDataSource(),
+				"confluent_schema_registry_cluster_mode":   schemaRegistryClusterModeDataSource(),
+				"confluent_user":                           userDataSource(),
 			},
 			ResourcesMap: map[string]*schema.Resource{
-				"confluent_api_key":                    apiKeyResource(),
-				"confluent_cluster_link":               clusterLinkResource(),
-				"confluent_kafka_cluster":              kafkaResource(),
-				"confluent_kafka_cluster_config":       kafkaConfigResource(),
-				"confluent_environment":                environmentResource(),
-				"confluent_identity_pool":              identityPoolResource(),
-				"confluent_identity_provider":          identityProviderResource(),
-				"confluent_kafka_client_quota":         kafkaClientQuotaResource(),
-				"confluent_ksql_cluster":               ksqlResource(),
-				"confluent_connector":                  connectorResource(),
-				"confluent_service_account":            serviceAccountResource(),
-				"confluent_kafka_topic":                kafkaTopicResource(),
-				"confluent_kafka_mirror_topic":         kafkaMirrorTopicResource(),
-				"confluent_kafka_acl":                  kafkaAclResource(),
-				"confluent_network":                    networkResource(),
-				"confluent_peering":                    peeringResource(),
-				"confluent_private_link_access":        privateLinkAccessResource(),
-				"confluent_role_binding":               roleBindingResource(),
-				"confluent_schema_registry_cluster":    schemaRegistryClusterResource(),
-				"confluent_transit_gateway_attachment": transitGatewayAttachmentResource(),
+				"confluent_api_key":                        apiKeyResource(),
+				"confluent_cluster_link":                   clusterLinkResource(),
+				"confluent_kafka_cluster":                  kafkaResource(),
+				"confluent_kafka_cluster_config":           kafkaConfigResource(),
+				"confluent_environment":                    environmentResource(),
+				"confluent_identity_pool":                  identityPoolResource(),
+				"confluent_identity_provider":              identityProviderResource(),
+				"confluent_kafka_client_quota":             kafkaClientQuotaResource(),
+				"confluent_ksql_cluster":                   ksqlResource(),
+				"confluent_connector":                      connectorResource(),
+				"confluent_service_account":                serviceAccountResource(),
+				"confluent_kafka_topic":                    kafkaTopicResource(),
+				"confluent_kafka_mirror_topic":             kafkaMirrorTopicResource(),
+				"confluent_kafka_acl":                      kafkaAclResource(),
+				"confluent_network":                        networkResource(),
+				"confluent_peering":                        peeringResource(),
+				"confluent_private_link_access":            privateLinkAccessResource(),
+				"confluent_role_binding":                   roleBindingResource(),
+				"confluent_schema_registry_cluster":        schemaRegistryClusterResource(),
+				"confluent_schema":                         schemaResource(),
+				"confluent_subject_mode":                   subjectModeResource(),
+				"confluent_subject_config":                 subjectConfigResource(),
+				"confluent_schema_registry_cluster_mode":   schemaRegistryClusterModeResource(),
+				"confluent_schema_registry_cluster_config": schemaRegistryClusterConfigResource(),
+				"confluent_transit_gateway_attachment":     transitGatewayAttachmentResource(),
 			},
 		}
 
@@ -236,18 +287,33 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	endpoint := d.Get("endpoint").(string)
 	cloudApiKey := d.Get("cloud_api_key").(string)
 	cloudApiSecret := d.Get("cloud_api_secret").(string)
+	kafkaClusterId := d.Get("kafka_id").(string)
 	kafkaApiKey := d.Get("kafka_api_key").(string)
 	kafkaApiSecret := d.Get("kafka_api_secret").(string)
 	kafkaRestEndpoint := d.Get("kafka_rest_endpoint").(string)
+	schemaRegistryClusterId := d.Get("schema_registry_id").(string)
+	schemaRegistryApiKey := d.Get("schema_registry_api_key").(string)
+	schemaRegistryApiSecret := d.Get("schema_registry_api_secret").(string)
+	schemaRegistryRestEndpoint := d.Get("schema_registry_rest_endpoint").(string)
 	// If the max_retries doesn't exist in the configuration, then 0 will be returned.
 	maxRetries := d.Get("max_retries").(int)
 
-	// All 3 attributes should be set or not set at the same time
+	// 3 or 4 attributes should be set or not set at the same time
+	// Option #2: (kafka_api_key, kafka_api_secret, kafka_rest_endpoint)
+	// Option #3 (primary): (kafka_api_key, kafka_api_secret, kafka_rest_endpoint, kafka_id)
 	allKafkaAttributesAreSet := (kafkaApiKey != "") && (kafkaApiSecret != "") && (kafkaRestEndpoint != "")
 	allKafkaAttributesAreNotSet := (kafkaApiKey == "") && (kafkaApiSecret == "") && (kafkaRestEndpoint == "")
 	justOneOrTwoKafkaAttributesAreSet := !(allKafkaAttributesAreSet || allKafkaAttributesAreNotSet)
 	if justOneOrTwoKafkaAttributesAreSet {
-		return nil, diag.Errorf("All 3 kafka_api_key, kafka_api_secret, kafka_rest_endpoint attributes should be set or not set in the provider block at the same time")
+		return nil, diag.Errorf("(kafka_api_key, kafka_api_secret, kafka_rest_endpoint) or (kafka_api_key, kafka_api_secret, kafka_rest_endpoint, kafka_id) attributes should be set or not set in the provider block at the same time")
+	}
+
+	// All 4 attributes should be set or not set at the same time
+	allSchemaRegistryAttributesAreSet := (schemaRegistryApiKey != "") && (schemaRegistryApiSecret != "") && (schemaRegistryRestEndpoint != "") && (schemaRegistryClusterId != "")
+	allSchemaRegistryAttributesAreNotSet := (schemaRegistryApiKey == "") && (schemaRegistryApiSecret == "") && (schemaRegistryRestEndpoint == "") && (schemaRegistryClusterId == "")
+	justSubsetOfSchemaRegistryAttributesAreSet := !(allSchemaRegistryAttributesAreSet || allSchemaRegistryAttributesAreNotSet)
+	if justSubsetOfSchemaRegistryAttributesAreSet {
+		return nil, diag.Errorf("All 4 schema_registry_api_key, schema_registry_api_secret, schema_registry_rest_endpoint, schema_registry_id attributes should be set or not set in the provider block at the same time")
 	}
 
 	userAgent := p.UserAgent(terraformProviderUserAgent, fmt.Sprintf("%s (https://confluent.cloud; support@confluent.io)", providerVersion))
@@ -295,14 +361,15 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 	quotasCfg.UserAgent = userAgent
 
 	var kafkaRestClientFactory *KafkaRestClientFactory
+	var schemaRegistryRestClientFactory *SchemaRegistryRestClientFactory
 
 	if maxRetries != 0 {
 		kafkaRestClientFactory = &KafkaRestClientFactory{userAgent: userAgent, maxRetries: &maxRetries}
+		schemaRegistryRestClientFactory = &SchemaRegistryRestClientFactory{userAgent: userAgent, maxRetries: &maxRetries}
 
 		apiKeysCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		cmkCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
-		// TODO: Uncomment once APIF-2660 is completed
-		// connectCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
+		connectCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		iamCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		iamV1Cfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		mdsCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
@@ -312,18 +379,13 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 		srcmCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		ksqlCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
 		quotasCfg.HTTPClient = NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
-
-		// TODO: Delete once APIF-2660 is completed
-		tempConnectClient := NewRetryableClientFactory(WithMaxRetries(maxRetries)).CreateRetryableClient()
-		tempConnectClient.Transport = &ItsActuallyJsonRoundTripper{tempConnectClient.Transport}
-		connectCfg.HTTPClient = tempConnectClient
 	} else {
 		kafkaRestClientFactory = &KafkaRestClientFactory{userAgent: userAgent}
+		schemaRegistryRestClientFactory = &SchemaRegistryRestClientFactory{userAgent: userAgent}
 
 		apiKeysCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		cmkCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
-		// TODO: Uncomment once APIF-2660 is completed
-		// connectCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
+		connectCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		iamCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		iamV1Cfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		mdsCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
@@ -333,35 +395,38 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData, p *schema.Pr
 		srcmCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		ksqlCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
 		quotasCfg.HTTPClient = NewRetryableClientFactory().CreateRetryableClient()
-
-		// TODO: Delete once APIF-2660 is completed
-		tempConnectClient := NewRetryableClientFactory().CreateRetryableClient()
-		tempConnectClient.Transport = &ItsActuallyJsonRoundTripper{tempConnectClient.Transport}
-		connectCfg.HTTPClient = tempConnectClient
 	}
 
 	client := Client{
-		apiKeysClient:          apikeys.NewAPIClient(apiKeysCfg),
-		cmkClient:              cmk.NewAPIClient(cmkCfg),
-		connectClient:          connect.NewAPIClient(connectCfg),
-		iamClient:              iam.NewAPIClient(iamCfg),
-		iamV1Client:            iamv1.NewAPIClient(iamV1Cfg),
-		netClient:              net.NewAPIClient(netCfg),
-		oidcClient:             oidc.NewAPIClient(oidcCfg),
-		orgClient:              org.NewAPIClient(orgCfg),
-		srcmClient:             srcm.NewAPIClient(srcmCfg),
-		ksqlClient:             ksql.NewAPIClient(ksqlCfg),
-		kafkaRestClientFactory: kafkaRestClientFactory,
-		mdsClient:              mds.NewAPIClient(mdsCfg),
-		quotasClient:           quotas.NewAPIClient(quotasCfg),
-		userAgent:              userAgent,
-		cloudApiKey:            cloudApiKey,
-		cloudApiSecret:         cloudApiSecret,
-		kafkaApiKey:            kafkaApiKey,
-		kafkaApiSecret:         kafkaApiSecret,
-		kafkaRestEndpoint:      kafkaRestEndpoint,
-		// For simplicity, treat all 3 variables as a "single" one
-		isKafkaMetadataSet: allKafkaAttributesAreSet,
+		apiKeysClient:                   apikeys.NewAPIClient(apiKeysCfg),
+		cmkClient:                       cmk.NewAPIClient(cmkCfg),
+		connectClient:                   connect.NewAPIClient(connectCfg),
+		iamClient:                       iam.NewAPIClient(iamCfg),
+		iamV1Client:                     iamv1.NewAPIClient(iamV1Cfg),
+		netClient:                       net.NewAPIClient(netCfg),
+		oidcClient:                      oidc.NewAPIClient(oidcCfg),
+		orgClient:                       org.NewAPIClient(orgCfg),
+		srcmClient:                      srcm.NewAPIClient(srcmCfg),
+		ksqlClient:                      ksql.NewAPIClient(ksqlCfg),
+		kafkaRestClientFactory:          kafkaRestClientFactory,
+		schemaRegistryRestClientFactory: schemaRegistryRestClientFactory,
+		mdsClient:                       mds.NewAPIClient(mdsCfg),
+		quotasClient:                    quotas.NewAPIClient(quotasCfg),
+		userAgent:                       userAgent,
+		cloudApiKey:                     cloudApiKey,
+		cloudApiSecret:                  cloudApiSecret,
+		kafkaClusterId:                  kafkaClusterId,
+		kafkaApiKey:                     kafkaApiKey,
+		kafkaApiSecret:                  kafkaApiSecret,
+		kafkaRestEndpoint:               kafkaRestEndpoint,
+		schemaRegistryClusterId:         schemaRegistryClusterId,
+		schemaRegistryApiKey:            schemaRegistryApiKey,
+		schemaRegistryApiSecret:         schemaRegistryApiSecret,
+		schemaRegistryRestEndpoint:      schemaRegistryRestEndpoint,
+		// For simplicity, treat 3 (for Kafka) and 4 (for SR) variables as a "single" one
+		isKafkaMetadataSet:          allKafkaAttributesAreSet,
+		isKafkaClusterIdSet:         kafkaClusterId != "",
+		isSchemaRegistryMetadataSet: allSchemaRegistryAttributesAreSet,
 	}
 
 	return &client, nil

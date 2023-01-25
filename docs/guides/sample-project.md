@@ -6,7 +6,7 @@ page_title: "Sample Project"
 
 ## Summary
 
-[![asciicast](https://asciinema.org/a/541797.svg)](https://asciinema.org/a/541797)
+[![asciicast](https://asciinema.org/a/552968.svg)](https://asciinema.org/a/552968)
 
 Use the Confluent Terraform provider to enable the lifecycle management of Confluent Cloud resources:
    * [Environments](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_environment)
@@ -28,6 +28,8 @@ Use the Confluent Terraform provider to enable the lifecycle management of Confl
    * [Kafka Cluster Configs](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_cluster_config)
    * [Kafka Mirror Topics](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_mirror_topic)
    * [Schema Registry Clusters](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema_registry_cluster)
+   * [ksqlDB Clusters](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_ksql_cluster)
+   * [Schemas](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema)
 
 In this guide, you will:
 
@@ -96,6 +98,7 @@ In this guide, you will:
 
 3. The `configurations` directory has a subdirectory for each of the following configurations:
     * [`basic-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/basic-kafka-acls): _Basic_ Kafka cluster with authorization using ACLs
+    * [`basic-kafka-acls-with-alias`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/basic-kafka-acls-with-alias): _Basic_ Kafka cluster with authorization using ACLs
     * [`standard-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/standard-kafka-acls): _Standard_ Kafka cluster with authorization using ACLs
     * [`standard-kafka-rbac`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/standard-kafka-rbac): _Standard_ Kafka cluster with authorization using RBAC
     * [`dedicated-public-kafka-acls`](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dedicated-public-kafka-acls): _Dedicated_ Kafka cluster that is accessible over the public internet with authorization using ACLs

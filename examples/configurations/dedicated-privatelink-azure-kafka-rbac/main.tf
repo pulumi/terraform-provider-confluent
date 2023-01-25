@@ -3,7 +3,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.19.0"
+      version = "1.25.0"
     }
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -220,7 +220,7 @@ resource "confluent_api_key" "app-producer-kafka-api-key" {
 
 // Note that in order to consume from a topic, the principal of the consumer ('app-consumer' service account)
 // needs to be authorized to perform 'READ' operation on both Topic and Group resources:
-resource "confluent_role_binding" "app-producer-developer-read-from-topic" {
+resource "confluent_role_binding" "app-consumer-developer-read-from-topic" {
   principal   = "User:${confluent_service_account.app-consumer.id}"
   role_name   = "DeveloperRead"
   crn_pattern = "${confluent_kafka_cluster.dedicated.rbac_crn}/kafka=${confluent_kafka_cluster.dedicated.id}/topic=${confluent_kafka_topic.orders.topic_name}"
@@ -248,7 +248,7 @@ provider "azurerm" {
 }
 
 locals {
-  hosted_zone = replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.rest_endpoint)[0], "glb.", "")
+  hosted_zone = length(regexall(".glb", confluent_kafka_cluster.dedicated.bootstrap_endpoint)) > 0 ? replace(regex("^[^.]+-([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.rest_endpoint)[0], "glb.", "") : regex("[.]([0-9a-zA-Z]+[.].*):[0-9]+$", confluent_kafka_cluster.dedicated.bootstrap_endpoint)[0]
   network_id  = regex("^([^.]+)[.].*", local.hosted_zone)[0]
 }
 
@@ -267,13 +267,6 @@ data "azurerm_subnet" "subnet" {
   name                 = each.value
   virtual_network_name = data.azurerm_virtual_network.vnet.name
   resource_group_name  = data.azurerm_resource_group.rg.name
-}
-
-locals {
-  assert_no_network_policies_enabled = length([
-    for _, subnet in data.azurerm_subnet.subnet :
-    true if ! subnet.enforce_private_link_endpoint_network_policies
-  ]) > 0 ? file("\n\nerror: private link endpoint network policies must be disabled https://docs.microsoft.com/en-us/azure/private-link/disable-private-endpoint-network-policy") : ""
 }
 
 resource "azurerm_private_dns_zone" "hz" {

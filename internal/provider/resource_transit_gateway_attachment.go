@@ -31,14 +31,12 @@ import (
 const (
 	paramRamResourceShareArn        = "ram_resource_share_arn"
 	paramTransitGatewayId           = "transit_gateway_id"
-	paramEnableCustomRoutes         = "enable_custom_routes"
 	paramTransitGatewayAttachmentId = "transit_gateway_attachment_id"
 	awsTransitGatewayAttachmentKind = "AwsTransitGatewayAttachment"
 )
 
 var paramAwsRamResourceShareArn = fmt.Sprintf("%s.0.%s", paramAws, paramRamResourceShareArn)
 var paramAwsTransitGatewayId = fmt.Sprintf("%s.0.%s", paramAws, paramTransitGatewayId)
-var paramAwsEnableCustomRoutes = fmt.Sprintf("%s.0.%s", paramAws, paramEnableCustomRoutes)
 
 func transitGatewayAttachmentResource() *schema.Resource {
 	return &schema.Resource{
@@ -83,14 +81,8 @@ func transitGatewayAttachmentCreate(ctx context.Context, d *schema.ResourceData,
 	if isAwsTransitGatewayAttachment {
 		ramResourceShareArn := d.Get(paramAwsRamResourceShareArn).(string)
 		transitGatewayId := d.Get(paramAwsTransitGatewayId).(string)
-		awsTransitGatewayAttachment := net.NewNetworkingV1AwsTransitGatewayAttachment(awsTransitGatewayAttachmentKind, ramResourceShareArn, transitGatewayId)
-		isRoutesAttributeSet := len(d.Get(paramAwsRoutes).([]interface{})) > 0
-		if isRoutesAttributeSet {
-			routes := convertToStringSlice(d.Get(paramAwsRoutes).([]interface{}))
-			awsTransitGatewayAttachment.SetRoutes(routes)
-		}
-		enableCustomerRoutes := d.Get(paramAwsEnableCustomRoutes).(bool)
-		awsTransitGatewayAttachment.SetEnableCustomRoutes(enableCustomerRoutes)
+		routes := convertToStringSlice(d.Get(paramAwsRoutes).([]interface{}))
+		awsTransitGatewayAttachment := net.NewNetworkingV1AwsTransitGatewayAttachment(awsTransitGatewayAttachmentKind, ramResourceShareArn, transitGatewayId, routes)
 		spec.SetCloud(net.NetworkingV1TransitGatewayAttachmentSpecCloudOneOf{NetworkingV1AwsTransitGatewayAttachment: awsTransitGatewayAttachment})
 	} else {
 		return diag.Errorf("None of %q blocks was provided for confluent_transit_gateway_attachment resource", paramAws)
@@ -187,7 +179,6 @@ func setTransitGatewayAttachmentAttributes(d *schema.ResourceData, transitGatewa
 			paramRamResourceShareArn:        transitGatewayAttachment.Spec.Cloud.NetworkingV1AwsTransitGatewayAttachment.GetRamShareArn(),
 			paramTransitGatewayId:           transitGatewayAttachment.Spec.Cloud.NetworkingV1AwsTransitGatewayAttachment.GetTransitGatewayId(),
 			paramRoutes:                     transitGatewayAttachment.Spec.Cloud.NetworkingV1AwsTransitGatewayAttachment.GetRoutes(),
-			paramEnableCustomRoutes:         transitGatewayAttachment.Spec.Cloud.NetworkingV1AwsTransitGatewayAttachment.GetEnableCustomRoutes(),
 			paramTransitGatewayAttachmentId: transitGatewayAttachment.Status.Cloud.NetworkingV1AwsTransitGatewayAttachmentStatus.GetTransitGatewayAttachmentId(),
 		}}); err != nil {
 			return nil, err
@@ -305,18 +296,10 @@ func awsTransitGatewayAttachmentSchema() *schema.Schema {
 					Description:  "The ID of the AWS Transit Gateway that your Confluent Cloud network attaches to.",
 					ValidateFunc: validation.StringMatch(regexp.MustCompile("^tgw-"), "AWS Transit Gateway ID must start with 'tgw-'."),
 				},
-				paramEnableCustomRoutes: {
-					Type:        schema.TypeBool,
-					Optional:    true,
-					ForceNew:    true,
-					Default:     false,
-					Description: "Enable custom destination routes in Confluent Cloud.",
-				},
 				paramRoutes: {
 					Type:        schema.TypeList,
-					Optional:    true,
+					Required:    true,
 					ForceNew:    true,
-					Computed:    true,
 					MinItems:    1,
 					Elem:        &schema.Schema{Type: schema.TypeString},
 					Description: "List of destination routes for traffic from Confluent VPC to customer VPC via Transit Gateway.",

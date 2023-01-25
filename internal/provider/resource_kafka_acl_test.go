@@ -213,7 +213,7 @@ func TestAccAcls(t *testing.T) {
 }
 
 func testAccCheckAclDestroy(s *terraform.State) error {
-	c := testAccProvider.Meta().(*Client).kafkaRestClientFactory.CreateKafkaRestClient(mockAclTestServerUrl, clusterId, kafkaApiKey, kafkaApiSecret, false)
+	c := testAccProvider.Meta().(*Client).kafkaRestClientFactory.CreateKafkaRestClient(mockAclTestServerUrl, clusterId, kafkaApiKey, kafkaApiSecret, false, false)
 	// Loop through the resources in state, verifying each ACL is destroyed
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "confluent_kafka_acl" {
