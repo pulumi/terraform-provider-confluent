@@ -29,49 +29,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-const (
-	scenarioStateSchemaHasBeenValidated = "A new schema has been just validated"
-	scenarioStateSchemaHasBeenCreated   = "A new schema has been just created"
-	scenarioStateSchemaHasBeenDeleted   = "The schema has been deleted"
-	schemaScenarioName                  = "confluent_schema Resource Lifecycle"
-
-	testSubjectName               = "test2"
-	testSchemaIdentifier          = 100001
-	testSchemaVersion             = 8
-	testFormat                    = "AVRO"
-	testStreamGovernanceClusterId = "lsrc-abc123"
-	testSchemaContent             = "foobar"
-	testSchemaResourceLabel       = "test_schema_resource_label"
-
-	testFirstSchemaReferenceDisplayName = "sampleRecord"
-	testFirstSchemaReferenceSubject     = "test2"
-	testFirstSchemaReferenceVersion     = 9
-
-	testSecondSchemaReferenceDisplayName = "sampleRecord2"
-	testSecondSchemaReferenceSubject     = "test3"
-	testSecondSchemaReferenceVersion     = 3
-
-	testNumberOfSchemaRegistrySchemaResourceAttributes = 10
-
-	testSchemaRegistryKey           = "foo"
-	testSchemaRegistrySecret        = "bar"
-	testSchemaRegistryUpdatedKey    = "foo_new"
-	testSchemaRegistryUpdatedSecret = "bar_new"
-)
-
-var fullSchemaResourceLabel = fmt.Sprintf("confluent_schema.%s", testSchemaResourceLabel)
-var validateSchemaPath = fmt.Sprintf("/compatibility/subjects/%s/versions", testSubjectName)
-var createSchemaPath = fmt.Sprintf("/subjects/%s/versions", testSubjectName)
-var readSchemasPath = fmt.Sprintf("/schemas")
-var deleteSchemaPath = fmt.Sprintf("/subjects/%s/versions/%s", testSubjectName, strconv.Itoa(testSchemaVersion))
-
-// TODO: APIF-1990
-var mockSchemaTestServerUrl = ""
-
-func TestAccSchema(t *testing.T) {
+func TestAccLatestSchema(t *testing.T) {
 	containerPort := "8080"
 	containerPortTcp := fmt.Sprintf("%s/tcp", containerPort)
 	ctx := context.Background()
@@ -139,6 +99,27 @@ func TestAccSchema(t *testing.T) {
 			http.StatusOK,
 		))
 
+	readLatestSchemaResponse, _ := ioutil.ReadFile("../testdata/schema_registry_schema/read_latest_schema.json")
+	_ = wiremockClient.StubFor(wiremock.Get(wiremock.URLPathEqualTo(readLatestSchemaPath)).
+		InScenario(schemaScenarioName).
+		WhenScenarioStateIs(scenarioStateSchemaHasBeenCreated).
+		WillReturn(
+			string(readLatestSchemaResponse),
+			contentTypeJSONHeader,
+			http.StatusOK,
+		))
+
+	checkSchemaExistsResponse, _ := ioutil.ReadFile("../testdata/schema_registry_schema/create_schema.json")
+	checkSchemaExistsStub := wiremock.Post(wiremock.URLPathEqualTo(createSchemaPath)).
+		InScenario(schemaScenarioName).
+		WhenScenarioStateIs(scenarioStateSchemaHasBeenCreated).
+		WillReturn(
+			string(checkSchemaExistsResponse),
+			contentTypeJSONHeader,
+			http.StatusOK,
+		)
+	_ = wiremockClient.StubFor(checkSchemaExistsStub)
+
 	deleteSchemaStub := wiremock.Delete(wiremock.URLPathEqualTo(deleteSchemaPath)).
 		InScenario(schemaScenarioName).
 		WhenScenarioStateIs(scenarioStateSchemaHasBeenCreated).
@@ -164,10 +145,12 @@ func TestAccSchema(t *testing.T) {
 	_ = os.Setenv("IMPORT_SCHEMA_REGISTRY_API_KEY", testSchemaRegistryUpdatedKey)
 	_ = os.Setenv("IMPORT_SCHEMA_REGISTRY_API_SECRET", testSchemaRegistryUpdatedSecret)
 	_ = os.Setenv("IMPORT_SCHEMA_REGISTRY_REST_ENDPOINT", mockSchemaTestServerUrl)
+	_ = os.Setenv("SCHEMA_CONTENT", testSchemaContent)
 	defer func() {
 		_ = os.Unsetenv("IMPORT_SCHEMA_REGISTRY_API_KEY")
 		_ = os.Unsetenv("IMPORT_SCHEMA_REGISTRY_API_SECRET")
 		_ = os.Unsetenv("IMPORT_SCHEMA_REGISTRY_REST_ENDPOINT")
+		_ = os.Unsetenv("SCHEMA_CONTENT")
 	}()
 
 	resource.Test(t, resource.TestCase{
@@ -178,10 +161,10 @@ func TestAccSchema(t *testing.T) {
 		// https://www.terraform.io/docs/extend/best-practices/testing.html#built-in-patterns
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckSchemaConfig(confluentCloudBaseUrl, mockSchemaTestServerUrl),
+				Config: testAccCheckLatestSchemaConfig(confluentCloudBaseUrl, mockSchemaTestServerUrl),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckSchemaExists(fullSchemaResourceLabel),
-					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "id", fmt.Sprintf("%s/%s/%d", testStreamGovernanceClusterId, testSubjectName, testSchemaIdentifier)),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "id", fmt.Sprintf("%s/%s/%s", testStreamGovernanceClusterId, testSubjectName, latestSchemaVersionAndPlaceholderForSchemaIdentifier)),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.#", "1"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.0.%", "1"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.0.id", testStreamGovernanceClusterId),
@@ -195,6 +178,8 @@ func TestAccSchema(t *testing.T) {
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema", testSchemaContent),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "version", strconv.Itoa(testSchemaVersion)),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_identifier", strconv.Itoa(testSchemaIdentifier)),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "hard_delete", testHardDelete),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "recreate_on_update", testRecreateOnUpdateFalse),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.#", "2"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.0.%", "3"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.0.name", testFirstSchemaReferenceDisplayName),
@@ -208,10 +193,10 @@ func TestAccSchema(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccCheckSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockSchemaTestServerUrl),
+				Config: testAccCheckLatestSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockSchemaTestServerUrl),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckSchemaExists(fullSchemaResourceLabel),
-					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "id", fmt.Sprintf("%s/%s/%d", testStreamGovernanceClusterId, testSubjectName, testSchemaIdentifier)),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "id", fmt.Sprintf("%s/%s/%s", testStreamGovernanceClusterId, testSubjectName, latestSchemaVersionAndPlaceholderForSchemaIdentifier)),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.#", "1"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.0.%", "1"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_registry_cluster.0.id", testStreamGovernanceClusterId),
@@ -225,6 +210,8 @@ func TestAccSchema(t *testing.T) {
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema", testSchemaContent),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "version", strconv.Itoa(testSchemaVersion)),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_identifier", strconv.Itoa(testSchemaIdentifier)),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "hard_delete", testHardDelete),
+					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "recreate_on_update", testRecreateOnUpdateFalse),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.#", "2"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.0.%", "3"),
 					resource.TestCheckResourceAttr(fullSchemaResourceLabel, "schema_reference.0.name", testFirstSchemaReferenceDisplayName),
@@ -246,35 +233,10 @@ func TestAccSchema(t *testing.T) {
 		},
 	})
 
-	checkStubCount(t, wiremockClient, createSchemaStub, fmt.Sprintf("POST %s", createSchemaPath), expectedCountOne)
 	checkStubCount(t, wiremockClient, deleteSchemaStub, fmt.Sprintf("DELETE %s", readSchemasPath), expectedCountOne)
 }
 
-func testAccCheckSchemaDestroy(s *terraform.State) error {
-	c := testAccProvider.Meta().(*Client).schemaRegistryRestClientFactory.CreateSchemaRegistryRestClient(mockSchemaTestServerUrl, clusterId, testSchemaRegistryKey, testSchemaRegistrySecret, false)
-	// Loop through the resources in state, verifying each Schema is destroyed
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "confluent_schema" {
-			continue
-		}
-		deletedSchemaId := rs.Primary.ID
-		schemaRegistrySchemas, _, err := c.apiClient.SchemasV1Api.GetSchemas(c.apiContext(context.Background())).Execute()
-		_, exists := findSchemaById(schemaRegistrySchemas, testSchemaIdentifier, testSubjectName)
-		if err == nil {
-			if exists {
-				if deletedSchemaId == rs.Primary.ID {
-					return fmt.Errorf("schema (%s) still exists", rs.Primary.ID)
-				}
-			} else {
-				return nil
-			}
-		}
-		return err
-	}
-	return nil
-}
-
-func testAccCheckSchemaConfig(confluentCloudBaseUrl, mockServerUrl string) string {
+func testAccCheckLatestSchemaConfig(confluentCloudBaseUrl, mockServerUrl string) string {
 	return fmt.Sprintf(`
 	provider "confluent" {
       endpoint = "%s"
@@ -292,6 +254,8 @@ func testAccCheckSchemaConfig(confluentCloudBaseUrl, mockServerUrl string) strin
 	  subject_name = "%s"
 	  format = "%s"
       schema = "%s"
+
+      hard_delete = "%s"
 	  
       schema_reference {
         name = "%s"
@@ -306,11 +270,12 @@ func testAccCheckSchemaConfig(confluentCloudBaseUrl, mockServerUrl string) strin
       }
 	}
 	`, confluentCloudBaseUrl, testSchemaResourceLabel, testStreamGovernanceClusterId, mockServerUrl, testSchemaRegistryKey, testSchemaRegistrySecret, testSubjectName, testFormat, testSchemaContent,
+		testHardDelete,
 		testFirstSchemaReferenceDisplayName, testFirstSchemaReferenceSubject, testFirstSchemaReferenceVersion,
 		testSecondSchemaReferenceDisplayName, testSecondSchemaReferenceSubject, testSecondSchemaReferenceVersion)
 }
 
-func testAccCheckSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockServerUrl string) string {
+func testAccCheckLatestSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockServerUrl string) string {
 	return fmt.Sprintf(`
 	provider "confluent" {
       endpoint = "%s"
@@ -327,6 +292,9 @@ func testAccCheckSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockS
 	  subject_name = "%s"
 	  format = "%s"
       schema = "%s"
+
+      hard_delete = "%s"
+      recreate_on_update = "%s"
 	  
       schema_reference {
         name = "%s"
@@ -341,22 +309,6 @@ func testAccCheckSchemaConfigWithUpdatedCredentials(confluentCloudBaseUrl, mockS
       }
 	}
 	`, confluentCloudBaseUrl, testSchemaResourceLabel, testStreamGovernanceClusterId, mockServerUrl, testSchemaRegistryUpdatedKey, testSchemaRegistryUpdatedSecret, testSubjectName, testFormat, testSchemaContent,
-		testFirstSchemaReferenceDisplayName, testFirstSchemaReferenceSubject, testFirstSchemaReferenceVersion,
+		testHardDelete, testRecreateOnUpdateFalse, testFirstSchemaReferenceDisplayName, testFirstSchemaReferenceSubject, testFirstSchemaReferenceVersion,
 		testSecondSchemaReferenceDisplayName, testSecondSchemaReferenceSubject, testSecondSchemaReferenceVersion)
-}
-
-func testAccCheckSchemaExists(n string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[n]
-
-		if !ok {
-			return fmt.Errorf("%s schema has not been found", n)
-		}
-
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("ID has not been set for %s schema", n)
-		}
-
-		return nil
-	}
 }

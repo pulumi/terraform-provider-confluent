@@ -22,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"regexp"
+	"strconv"
 )
 
 func schemaDataSource() *schema.Resource {
@@ -87,6 +88,16 @@ func schemaDataSource() *schema.Resource {
 					},
 				},
 			},
+			paramHardDelete: {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Controls whether a schema should be soft or hard deleted. Set it to `true` if you want to hard delete a schema on destroy. Defaults to `false` (soft delete).",
+			},
+			paramRecreateOnUpdate: {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Controls whether a schema should be recreated on update.",
+			},
 		},
 	}
 }
@@ -113,10 +124,16 @@ func schemaDataSourceRead(ctx context.Context, d *schema.ResourceData, meta inte
 	// Mark resource as new to avoid d.Set("") when getting 404
 	d.MarkNewResource()
 
-	if _, err := readSchemaRegistryConfigAndSetAttributes(ctx, d, schemaRegistryRestClient, subjectName, int32(schemaIdentifier)); err != nil {
+	if _, err := readSchemaRegistryConfigAndSetAttributes(ctx, d, schemaRegistryRestClient, subjectName, strconv.Itoa(schemaIdentifier)); err != nil {
 		return diag.Errorf("error reading Schema: %s", createDescriptiveError(err))
 	}
-
+	srSchema, _, err := loadSchema(ctx, d, schemaRegistryRestClient, subjectName, strconv.Itoa(schemaIdentifier))
+	if err != nil {
+		return diag.Errorf("error reading Schema: %s", createDescriptiveError(err))
+	}
+	if err := d.Set(paramSchema, srSchema.GetSchema()); err != nil {
+		return diag.Errorf("error reading Schema: %s", createDescriptiveError(err))
+	}
 	tflog.Debug(ctx, fmt.Sprintf("Finished reading Schema %q", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
 
 	return nil

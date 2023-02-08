@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.25.0"
+      version = "1.29.0"
     }
   }
 }
@@ -260,7 +260,7 @@ resource "confluent_api_key" "env-manager-schema-registry-api-key" {
   ]
 }
 
-resource "confluent_schema" "purchase-v1" {
+resource "confluent_schema" "purchase" {
   schema_registry_cluster {
     id = confluent_schema_registry_cluster.essentials.id
   }

@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.25.0"
+      version = "1.29.0"
     }
   }
 }
@@ -20,8 +20,8 @@ resource "confluent_environment" "staging" {
 # but you should to place both in the same cloud and region to restrict the fault isolation boundary.
 data "confluent_schema_registry_region" "essentials" {
   cloud   = "AWS"
-  region  = "us-east-2"
-  package = "ESSENTIALS"
+  region  = "us-east-1"
+  package = "ADVANCED"
 }
 
 resource "confluent_schema_registry_cluster" "essentials" {
@@ -43,10 +43,22 @@ resource "confluent_kafka_cluster" "basic" {
   display_name = "inventory"
   availability = "SINGLE_ZONE"
   cloud        = "AWS"
-  region       = "us-east-2"
+  region       = "us-east-1"
   basic {}
   environment {
     id = confluent_environment.staging.id
+  }
+}
+
+resource "confluent_kafka_topic" "orders" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+  topic_name    = "orders"
+  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
+  credentials {
+    key    = confluent_api_key.app-manager-kafka-api-key.id
+    secret = confluent_api_key.app-manager-kafka-api-key.secret
   }
 }
 
@@ -94,21 +106,14 @@ resource "confluent_api_key" "app-manager-kafka-api-key" {
   ]
 }
 
-resource "confluent_kafka_topic" "orders" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  topic_name    = "orders"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
 resource "confluent_service_account" "app-consumer" {
   display_name = "app-consumer"
   description  = "Service account to consume from 'orders' topic of 'inventory' Kafka cluster"
+}
+
+resource "confluent_service_account" "app-connector" {
+  display_name = "app-connector"
+  description  = "Service account of mongo db Source Connector to consume from 'orders' topic of 'inventory' Kafka cluster"
 }
 
 resource "confluent_api_key" "app-consumer-kafka-api-key" {
@@ -128,24 +133,6 @@ resource "confluent_api_key" "app-consumer-kafka-api-key" {
     environment {
       id = confluent_environment.staging.id
     }
-  }
-}
-
-resource "confluent_kafka_acl" "app-producer-write-on-topic" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.orders.topic_name
-  pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.app-producer.id}"
-  host          = "*"
-  operation     = "WRITE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
   }
 }
 
@@ -174,55 +161,6 @@ resource "confluent_api_key" "app-producer-kafka-api-key" {
   }
 }
 
-// Note that in order to consume from a topic, the principal of the consumer ('app-consumer' service account)
-// needs to be authorized to perform 'READ' operation on both Topic and Group resources:
-// confluent_kafka_acl.app-consumer-read-on-topic, confluent_kafka_acl.app-consumer-read-on-group.
-// https://docs.confluent.io/platform/current/kafka/authorization.html#using-acls
-resource "confluent_kafka_acl" "app-consumer-read-on-topic" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.orders.topic_name
-  pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.app-consumer.id}"
-  host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-consumer-read-on-group" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "GROUP"
-  // The existing values of resource_name, pattern_type attributes are set up to match Confluent CLI's default consumer group ID ("confluent_cli_consumer_<uuid>").
-  // https://docs.confluent.io/confluent-cli/current/command-reference/kafka/topic/confluent_kafka_topic_consume.html
-  // Update the values of resource_name, pattern_type attributes to match your target consumer group ID.
-  // https://docs.confluent.io/platform/current/kafka/authorization.html#prefixed-acls
-  resource_name = "confluent_cli_consumer_"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-consumer.id}"
-  host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_service_account" "app-connector" {
-  display_name = "app-connector"
-  description  = "Service account of dynamodb Sink Connector to consume from 'orders' topic of 'inventory' Kafka cluster"
-}
-
 
 resource "confluent_kafka_acl" "app-connector-describe-on-cluster" {
   kafka_cluster {
@@ -242,33 +180,51 @@ resource "confluent_kafka_acl" "app-connector-describe-on-cluster" {
   }
 }
 
-resource "confluent_kafka_acl" "app-connector-read-on-target-topic" {
+resource "confluent_kafka_acl" "app-connector-create-on-prefix-topics" {
   kafka_cluster {
     id = confluent_kafka_cluster.basic.id
   }
   resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.orders.topic_name
+  resource_name = "${local.topic_prefix}"
+  pattern_type  = "PREFIXED"
+  principal     = "User:${confluent_service_account.app-connector.id}"
+  host          = "*"
+  operation     = "CREATE"
+  permission    = "ALLOW"
+  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
+  credentials {
+    key    = confluent_api_key.app-manager-kafka-api-key.id
+    secret = confluent_api_key.app-manager-kafka-api-key.secret
+  }
+}
+
+resource "confluent_kafka_acl" "app-connector-write-on-prefix-topics" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+  resource_type = "TOPIC"
+  resource_name = "${local.topic_prefix}"
+  pattern_type  = "PREFIXED"
+  principal     = "User:${confluent_service_account.app-connector.id}"
+  host          = "*"
+  operation     = "WRITE"
+  permission    = "ALLOW"
+  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
+  credentials {
+    key    = confluent_api_key.app-manager-kafka-api-key.id
+    secret = confluent_api_key.app-manager-kafka-api-key.secret
+  }
+}
+
+resource "confluent_kafka_acl" "app-connector-create-on-data-preview-topics" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+  resource_type = "TOPIC"
+  resource_name = "data-preview.${local.database}.${local.collection}"
   pattern_type  = "LITERAL"
   principal     = "User:${confluent_service_account.app-connector.id}"
   host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-connector-create-on-dlq-lcc-topics" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = "dlq-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
   operation     = "CREATE"
   permission    = "ALLOW"
   rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
@@ -278,13 +234,13 @@ resource "confluent_kafka_acl" "app-connector-create-on-dlq-lcc-topics" {
   }
 }
 
-resource "confluent_kafka_acl" "app-connector-write-on-dlq-lcc-topics" {
+resource "confluent_kafka_acl" "app-connector-write-on-data-preview-topics" {
   kafka_cluster {
     id = confluent_kafka_cluster.basic.id
   }
   resource_type = "TOPIC"
-  resource_name = "dlq-lcc"
-  pattern_type  = "PREFIXED"
+  resource_name = "data-preview.${local.database}.${local.collection}"
+  pattern_type  = "LITERAL"
   principal     = "User:${confluent_service_account.app-connector.id}"
   host          = "*"
   operation     = "WRITE"
@@ -296,97 +252,7 @@ resource "confluent_kafka_acl" "app-connector-write-on-dlq-lcc-topics" {
   }
 }
 
-resource "confluent_kafka_acl" "app-connector-create-on-success-lcc-topics" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = "success-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
-  operation     = "CREATE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-connector-write-on-success-lcc-topics" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = "success-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
-  operation     = "WRITE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-connector-create-on-error-lcc-topics" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = "error-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
-  operation     = "CREATE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-connector-write-on-error-lcc-topics" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = "error-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
-  operation     = "WRITE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_kafka_acl" "app-connector-read-on-connect-lcc-group" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "GROUP"
-  resource_name = "connect-lcc"
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-connector.id}"
-  host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
-resource "confluent_connector" "dynamo-db-sink" {
+resource "confluent_connector" "mongo-db-source" {
   environment {
     id = confluent_environment.staging.id
   }
@@ -395,35 +261,43 @@ resource "confluent_connector" "dynamo-db-sink" {
   }
 
   // Block for custom *sensitive* configuration properties that are labelled with "Type: password" under "Configuration Properties" section in the docs:
-  // https://docs.confluent.io/cloud/current/connectors/cc-amazon-dynamo-db-sink.html#configuration-properties
+  // https://docs.confluent.io/cloud/current/connectors/cc-mongo-db-source.html#configuration-properties
   config_sensitive = {
-    "aws.access.key.id"     = "***REDACTED***"
-    "aws.secret.access.key" = "***REDACTED***"
+    "connection.password" = "***REDACTED***",
   }
 
   // Block for custom *nonsensitive* configuration properties that are *not* labelled with "Type: password" under "Configuration Properties" section in the docs:
-  // https://docs.confluent.io/cloud/current/connectors/cc-amazon-dynamo-db-sink.html#configuration-properties
+  // https://docs.confluent.io/cloud/current/connectors/cc-mongo-db-source.html#configuration-properties
   config_nonsensitive = {
-    "topics"                   = confluent_kafka_topic.orders.topic_name
-    "input.data.format"        = "JSON"
-    "connector.class"          = "DynamoDbSink"
-    "name"                     = "DynamoDbSinkConnector_0"
+    "connector.class" = "MongoDbAtlasSource"
+    "name" = "confluent-mongodb-source"
     "kafka.auth.mode"          = "SERVICE_ACCOUNT"
     "kafka.service.account.id" = confluent_service_account.app-connector.id
-    "aws.dynamodb.pk.hash"     = "value.userid",
-    "aws.dynamodb.pk.sort"     = "value.pageid",
-    "tasks.max"                = "1"
+    "connection.host" = local.connection_host
+    "connection.user" = local.connection_user
+    "topic.prefix" = local.topic_prefix
+    "database" = local.database
+    "collection" = local.collection
+    "poll.await.time.ms" = "5000"
+    "poll.max.batch.size" = "1000"
+    "copy.existing" = "true"
+    "output.data.format" = "JSON"
+    "tasks.max" = "1"
   }
 
   depends_on = [
     confluent_kafka_acl.app-connector-describe-on-cluster,
-    confluent_kafka_acl.app-connector-read-on-target-topic,
-    confluent_kafka_acl.app-connector-create-on-dlq-lcc-topics,
-    confluent_kafka_acl.app-connector-write-on-dlq-lcc-topics,
-    confluent_kafka_acl.app-connector-create-on-success-lcc-topics,
-    confluent_kafka_acl.app-connector-write-on-success-lcc-topics,
-    confluent_kafka_acl.app-connector-create-on-error-lcc-topics,
-    confluent_kafka_acl.app-connector-write-on-error-lcc-topics,
-    confluent_kafka_acl.app-connector-read-on-connect-lcc-group,
+    confluent_kafka_acl.app-connector-create-on-prefix-topics,
+    confluent_kafka_acl.app-connector-write-on-prefix-topics,
+    confluent_kafka_acl.app-connector-create-on-data-preview-topics,
+    confluent_kafka_acl.app-connector-write-on-data-preview-topics,
   ]
+}
+
+locals {
+  topic_prefix = "sample_topic_prefix"
+  database = "sample_database"
+  collection = "sample_collection"
+  connection_host = "cluster4-r5q3r7.gcp.mongodb.net"
+  connection_user = "confluentuser"
 }

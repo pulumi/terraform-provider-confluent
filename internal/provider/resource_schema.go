@@ -21,10 +21,11 @@ import (
 	sr "github.com/confluentinc/ccloud-sdk-go-v2/schema-registry/v1"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/structure"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,10 +41,16 @@ const (
 	protobufFormat                           = "PROTOBUF"
 	paramVersion                             = "version"
 	// unique on a subject level
-	paramSchemaIdentifier = "schema_identifier"
-	paramSchema           = "schema"
-	paramSchemaReference  = "schema_reference"
-	paramSubjectName      = "subject_name"
+	paramSchemaIdentifier             = "schema_identifier"
+	paramSchema                       = "schema"
+	paramSchemaReference              = "schema_reference"
+	paramSubjectName                  = "subject_name"
+	paramHardDelete                   = "hard_delete"
+	paramHardDeleteDefaultValue       = false
+	paramRecreateOnUpdate             = "recreate_on_update"
+	paramRecreateOnUpdateDefaultValue = false
+
+	latestSchemaVersionAndPlaceholderForSchemaIdentifier = "latest"
 )
 
 var acceptedSchemaFormats = []string{avroFormat, jsonFormat, protobufFormat}
@@ -89,23 +96,10 @@ func schemaResource() *schema.Resource {
 			},
 			paramSchema: {
 				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
+				Computed:     true,
+				Optional:     true,
 				Description:  "The definition of the Schema.",
 				ValidateFunc: validation.StringIsNotEmpty,
-				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
-					format := d.Get(paramFormat).(string)
-					if format == avroFormat || format == jsonFormat {
-						normalizedOldJson, _ := structure.NormalizeJsonString(old)
-						normalizedNewJson, _ := structure.NormalizeJsonString(new)
-						return normalizedOldJson == normalizedNewJson
-					} else if format == protobufFormat {
-						return compareTwoProtos(new, old)
-					}
-					// There's an input validation for schema attribute on a schema level already,
-					// so this line won't be run.
-					return false
-				},
 			},
 			paramVersion: {
 				Type:        schema.TypeInt,
@@ -119,9 +113,8 @@ func schemaResource() *schema.Resource {
 			},
 			paramSchemaReference: {
 				Description: "The list of references to other Schemas.",
-				Type:        schema.TypeList,
+				Type:        schema.TypeSet,
 				Optional:    true,
-				ForceNew:    true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						paramSubjectName: {
@@ -147,8 +140,96 @@ func schemaResource() *schema.Resource {
 					},
 				},
 			},
+			paramHardDelete: {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     paramHardDeleteDefaultValue,
+				Description: "Controls whether a schema should be soft or hard deleted. Set it to `true` if you want to hard delete a schema on destroy. Defaults to `false` (soft delete).",
+			},
+			paramRecreateOnUpdate: {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				ForceNew:    true,
+				Default:     paramRecreateOnUpdateDefaultValue,
+				Description: "Controls whether a schema should be recreated on update.",
+			},
 		},
+		CustomizeDiff: customdiff.Sequence(SetSchemaDiff),
 	}
+}
+
+func SetSchemaDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	// Skip if the schema doesn't exist yet
+	if diff.Id() == "" {
+		return nil
+	}
+
+	if !diff.HasChange(paramSchema) {
+		return nil
+	}
+
+	oldObj, newObj := diff.GetChange(paramSchema)
+	oldSchema := oldObj.(string)
+	newSchema := newObj.(string)
+
+	client := meta.(*Client)
+
+	var restEndpoint, clusterId, clusterApiKey, clusterApiSecret string
+
+	// We could have used interfaces here to reuse code from schemaCreate()
+	// but it's probably a safer approach to duplicate code here since debug messages are different / no imports either.
+	if client.isSchemaRegistryMetadataSet {
+		restEndpoint = client.schemaRegistryRestEndpoint
+		clusterId = client.schemaRegistryClusterId
+		clusterApiKey = client.schemaRegistryApiKey
+		clusterApiSecret = client.schemaRegistryApiSecret
+	} else {
+		restEndpoint = diff.Get(paramRestEndpoint).(string)
+		clusterId = diff.Get(fmt.Sprintf("%s.0.%s", paramSchemaRegistryCluster, paramId)).(string)
+		clusterApiKey = diff.Get(fmt.Sprintf("%s.0.%s", paramCredentials, paramKey)).(string)
+		clusterApiSecret = diff.Get(fmt.Sprintf("%s.0.%s", paramCredentials, paramSecret)).(string)
+	}
+
+	schemaRegistryRestClient := meta.(*Client).schemaRegistryRestClientFactory.CreateSchemaRegistryRestClient(restEndpoint, clusterId, clusterApiKey, clusterApiSecret, meta.(*Client).isSchemaRegistryMetadataSet)
+
+	subjectName := diff.Get(paramSubjectName).(string)
+	format := diff.Get(paramFormat).(string)
+	schemaContent := newSchema
+	schemaReferences := buildSchemaReferences(diff.Get(paramSchemaReference).(*schema.Set).List())
+
+	createSchemaRequest := sr.NewRegisterSchemaRequest()
+	createSchemaRequest.SetSchemaType(format)
+	createSchemaRequest.SetSchema(schemaContent)
+	createSchemaRequest.SetReferences(schemaReferences)
+	createSchemaRequestJson, err := json.Marshal(createSchemaRequest)
+	if err != nil {
+		return fmt.Errorf("error customizing diff Schema: error marshaling %#v to json: %s", createSchemaRequest, createDescriptiveError(err))
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Customizing diff new Schema: %s", createSchemaRequestJson))
+
+	registeredSchema, resp, err := executeSchemaLookup(ctx, schemaRegistryRestClient, createSchemaRequest, subjectName)
+
+	if resp != nil && http.StatusNotFound == resp.StatusCode {
+		// Requested schema doesn't exist
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("error customizing diff Schema: %s", createDescriptiveError(err))
+	}
+
+	schemaIdentifier := diff.Get(paramSchemaIdentifier).(int)
+	if int(registeredSchema.GetId()) == schemaIdentifier {
+		// Two schemas that are semantically equivalent
+		// https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#schema-normalization
+
+		// Set old value to paramSchema to avoid TF drift
+		if err := diff.SetNew(paramSchema, oldSchema); err != nil {
+			return fmt.Errorf("error customizing diff Schema: %s", createDescriptiveError(err))
+		}
+	}
+	return nil
 }
 
 func schemaCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -168,7 +249,7 @@ func schemaCreate(ctx context.Context, d *schema.ResourceData, meta interface{})
 	subjectName := d.Get(paramSubjectName).(string)
 	format := d.Get(paramFormat).(string)
 	schemaContent := d.Get(paramSchema).(string)
-	schemaReferences := buildSchemaReferences(d.Get(paramSchemaReference).([]interface{}))
+	schemaReferences := buildSchemaReferences(d.Get(paramSchemaReference).(*schema.Set).List())
 
 	createSchemaRequest := sr.NewRegisterSchemaRequest()
 	createSchemaRequest.SetSchemaType(format)
@@ -196,7 +277,12 @@ func schemaCreate(ctx context.Context, d *schema.ResourceData, meta interface{})
 		return diag.Errorf("error creating Schema: %s", createDescriptiveError(err))
 	}
 
-	schemaId := createSchemaId(schemaRegistryRestClient.clusterId, subjectName, registeredSchema.GetId())
+	// Save the schema content
+	if err := d.Set(paramSchema, schemaContent); err != nil {
+		return diag.FromErr(createDescriptiveError(err))
+	}
+
+	schemaId := createSchemaId(schemaRegistryRestClient.clusterId, subjectName, registeredSchema.GetId(), d.Get(paramRecreateOnUpdate).(bool))
 	d.SetId(schemaId)
 
 	// https://github.com/confluentinc/terraform-provider-confluent/issues/40#issuecomment-1048782379
@@ -209,33 +295,46 @@ func schemaCreate(ctx context.Context, d *schema.ResourceData, meta interface{})
 
 func schemaDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	// TODO: Remove subject when deleting the last schema
-	tflog.Debug(ctx, fmt.Sprintf("Soft deleting Schema %q", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
+	deletionType := "soft"
+	isHardDeleteEnabled := d.Get(paramHardDelete).(bool)
+	if isHardDeleteEnabled {
+		deletionType = "hard"
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("%s deleting Schema %q", deletionType, d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
 
 	restEndpoint, err := extractSchemaRegistryRestEndpoint(meta.(*Client), d, false)
 	if err != nil {
-		return diag.Errorf("error soft deleting Schema: %s", createDescriptiveError(err))
+		return diag.Errorf("error %s deleting Schema: %s", deletionType, createDescriptiveError(err))
 	}
 	clusterId, err := extractSchemaRegistryClusterId(meta.(*Client), d, false)
 	if err != nil {
-		return diag.Errorf("error soft deleting Schema: %s", createDescriptiveError(err))
+		return diag.Errorf("error %s deleting Schema: %s", deletionType, createDescriptiveError(err))
 	}
 	clusterApiKey, clusterApiSecret, err := extractSchemaRegistryClusterApiKeyAndApiSecret(meta.(*Client), d, false)
 	if err != nil {
-		return diag.Errorf("error soft deleting Schema: %s", createDescriptiveError(err))
+		return diag.Errorf("error %s deleting Schema: %s", deletionType, createDescriptiveError(err))
 	}
 	schemaRegistryRestClient := meta.(*Client).schemaRegistryRestClientFactory.CreateSchemaRegistryRestClient(restEndpoint, clusterId, clusterApiKey, clusterApiSecret, meta.(*Client).isSchemaRegistryMetadataSet)
 	subjectName := d.Get(paramSubjectName).(string)
 	schemaVersion := d.Get(paramVersion).(int)
 
-	_, _, err = schemaRegistryRestClient.apiClient.SubjectVersionsV1Api.DeleteSchemaVersion(schemaRegistryRestClient.apiContext(ctx), subjectName, strconv.Itoa(schemaVersion)).Execute()
+	// Both soft and hard delete requires a user to run a soft delete first
+	err = executeSchemaDelete(schemaRegistryRestClient.apiContext(ctx), schemaRegistryRestClient, subjectName, strconv.Itoa(schemaVersion), false)
 
 	if err != nil {
-		return diag.Errorf("error soft deleting Schema %q: %s", d.Id(), createDescriptiveError(err))
+		return diag.Errorf("error %s deleting Schema %q: %s", deletionType, d.Id(), createDescriptiveError(err))
 	}
 
-	time.Sleep(schemaRegistryAPIWaitAfterCreateOrDelete)
+	if isHardDeleteEnabled {
+		err = executeSchemaDelete(schemaRegistryRestClient.apiContext(ctx), schemaRegistryRestClient, subjectName, strconv.Itoa(schemaVersion), true)
 
-	tflog.Debug(ctx, fmt.Sprintf("Finished soft deleting Schema %q", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
+		if err != nil {
+			return diag.Errorf("error %s deleting Schema %q: %s", deletionType, d.Id(), createDescriptiveError(err))
+		}
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Finished %s deleting Schema %q", deletionType, d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
 
 	return nil
 }
@@ -277,29 +376,51 @@ func schemaRead(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 }
 
 func schemaUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	if d.HasChangesExcept(paramCredentials, paramConfigs) {
-		return diag.Errorf("error updating Schema %q: only %q and %q blocks can be updated for Schema", d.Id(), paramCredentials, paramConfigs)
+	if d.HasChangesExcept(paramCredentials, paramConfigs, paramHardDelete, paramSchema, paramSchemaReference) {
+		return diag.Errorf("error updating Schema %q: only %q, %q, %q, %q and %q blocks can be updated for Schema", d.Id(), paramCredentials, paramConfigs, paramHardDelete, paramSchema, paramSchemaReference)
 	}
+
+	if d.HasChanges(paramSchema, paramSchemaReference) {
+		oldSchema, _ := d.GetChange(paramSchema)
+		oldSchemaReference, _ := d.GetChange(paramSchemaReference)
+
+		// User wants to edit / evolve a schema. See https://docs.confluent.io/cloud/current/sr/schemas-manage.html#editing-schemas for more details.
+		shouldRecreateOnUpdate := d.Get(paramRecreateOnUpdate).(bool)
+		if shouldRecreateOnUpdate {
+			// At this point new schema and schema_reference is saved to TF file,
+			// so we need to revert it to the old value to avoid TF drift.
+			if err := d.Set(paramSchema, oldSchema); err != nil {
+				return diag.FromErr(createDescriptiveError(err))
+			}
+			if err := d.Set(paramSchemaReference, oldSchemaReference); err != nil {
+				return diag.FromErr(createDescriptiveError(err))
+			}
+			return diag.Errorf("error updating Schema %q: reimport the current resource instance and set %s = false to evolve a schema using the same resource instance.\nIn this case, on an update resource instance will reference the updated (latest) schema by overriding %s, %s and %s attributes and the old schema will be orphaned.", d.Id(), paramRecreateOnUpdate, paramSchemaIdentifier, paramSchema, paramVersion)
+		}
+		// Create a new schema and make existing resource instance point to it.
+		return schemaCreate(ctx, d, meta)
+	}
+
 	return schemaRead(ctx, d, meta)
 }
 
-func createSchemaId(clusterId, subjectName string, identifier int32) string {
-	return fmt.Sprintf("%s/%s/%d", clusterId, subjectName, identifier)
+func createSchemaId(clusterId, subjectName string, identifier int32, shouldRecreateOnUpdate bool) string {
+	if !shouldRecreateOnUpdate {
+		// https://docs.confluent.io/platform/current/schema-registry/develop/api.html#get--subjects-(string-%20subject)-versions-(versionId-%20version)
+		return fmt.Sprintf("%s/%s/latest", clusterId, subjectName)
+	} else {
+		return fmt.Sprintf("%s/%s/%d", clusterId, subjectName, identifier)
+	}
 }
 
-func extractSchemaIdentifierFromTfId(terraformId string) (int32, error) {
+func extractSchemaIdentifierFromTfId(terraformId string) (string, error) {
 	parts := strings.Split(terraformId, "/")
 
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("error extracting Schema Identifier from Resource ID: invalid format: expected '<Schema Registry cluster ID>/<subject name>/<schema identifier>'")
+		return "", fmt.Errorf("error extracting Schema Identifier from Resource ID: invalid format: expected '<Schema Registry cluster ID>/<subject name>/<schema identifier>'")
 	}
 
-	stringIdentifier := parts[2]
-	identifier, err := strconv.Atoi(stringIdentifier)
-	if err != nil {
-		return 0, fmt.Errorf("error extracting Schema Identifier from Resource ID: invalid format: expected '<schema identifier>'=%q to be an int: %s", stringIdentifier, err)
-	}
-	return int32(identifier), nil
+	return parts[2], nil
 }
 
 func extractSubjectNameFromTfId(terraformId string) (string, error) {
@@ -315,6 +436,11 @@ func extractSubjectNameFromTfId(terraformId string) (string, error) {
 func schemaImport(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	tflog.Debug(ctx, fmt.Sprintf("Importing Schema %q", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
 
+	schemaContent := os.Getenv("SCHEMA_CONTENT")
+	if schemaContent == "" {
+		return nil, fmt.Errorf("error importing Schema %q: SCHEMA_CONTENT environment variable is empty but it must be set", d.Id())
+	}
+
 	restEndpoint, err := extractSchemaRegistryRestEndpoint(meta.(*Client), d, true)
 	if err != nil {
 		return nil, fmt.Errorf("error importing Schema: %s", createDescriptiveError(err))
@@ -327,41 +453,73 @@ func schemaImport(ctx context.Context, d *schema.ResourceData, meta interface{})
 	clusterIDAndSubjectNameAndSchemaIdentifier := d.Id()
 	parts := strings.Split(clusterIDAndSubjectNameAndSchemaIdentifier, "/")
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("error importing Schema: invalid format: expected '<SG cluster ID>/<subject name>/<schema identifier>'")
+		return nil, fmt.Errorf("error importing Schema: invalid format: expected '<SG cluster ID>/<subject name>/latest' or '<SG cluster ID>/<subject name>/<schema identifier>'")
 	}
 
 	clusterId := parts[0]
 	subjectName := parts[1]
 	schemaIdentifier := parts[2]
-	schemaIdentifierInt, err := strconv.Atoi(schemaIdentifier)
-	if err != nil {
-		return nil, fmt.Errorf("error importing Schema: invalid format: expected schema identifier from '<SG cluster ID>/<subject name>/<schema identifier>' to be an int")
-	}
 	schemaRegistryRestClient := meta.(*Client).schemaRegistryRestClientFactory.CreateSchemaRegistryRestClient(restEndpoint, clusterId, clusterApiKey, clusterApiSecret, meta.(*Client).isSchemaRegistryMetadataSet)
 
 	// Mark resource as new to avoid d.Set("") when getting 404
 	d.MarkNewResource()
-	if _, err := readSchemaRegistryConfigAndSetAttributes(ctx, d, schemaRegistryRestClient, subjectName, int32(schemaIdentifierInt)); err != nil {
+	if _, err := readSchemaRegistryConfigAndSetAttributes(ctx, d, schemaRegistryRestClient, subjectName, schemaIdentifier); err != nil {
 		return nil, fmt.Errorf("error importing Schema %q: %s", d.Id(), createDescriptiveError(err))
+	}
+	if err := d.Set(paramSchema, schemaContent); err != nil {
+		return nil, createDescriptiveError(err)
 	}
 	tflog.Debug(ctx, fmt.Sprintf("Finished importing Schema %q", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
 	return []*schema.ResourceData{d}, nil
 }
 
-func readSchemaRegistryConfigAndSetAttributes(ctx context.Context, d *schema.ResourceData, c *SchemaRegistryRestClient, subjectName string, schemaIdentifier int32) ([]*schema.ResourceData, error) {
+func loadIdForLatestSchema(ctx context.Context, d *schema.ResourceData, c *SchemaRegistryRestClient, subjectName string) (string, error) {
+	latestSchema, _, err := c.apiClient.SubjectVersionsV1Api.GetSchemaByVersion(c.apiContext(ctx), subjectName, latestSchemaVersionAndPlaceholderForSchemaIdentifier).Execute()
+	if err != nil {
+		return "", fmt.Errorf("error loading the latest Schema: %s", createDescriptiveError(err))
+	}
+	return strconv.Itoa(int(latestSchema.GetId())), nil
+}
+
+func isLatestSchema(schemaIdentifier string) bool {
+	return schemaIdentifier == latestSchemaVersionAndPlaceholderForSchemaIdentifier
+}
+
+func loadSchema(ctx context.Context, d *schema.ResourceData, c *SchemaRegistryRestClient, subjectName string, schemaIdentifier string) (*sr.Schema, bool, error) {
+	// Option #1: find the schema identifier of the latest schema
+	var err error
+	if isLatestSchema(schemaIdentifier) {
+		schemaIdentifier, err = loadIdForLatestSchema(ctx, d, c, subjectName)
+		if err != nil {
+			return nil, false, fmt.Errorf("error loading the latest Schema: %s", createDescriptiveError(err))
+		}
+	}
+
+	// Option #2: load schemas and filter by schemaIdentifier
+	// Load a schema by ID (schemaIdentifier is not -1 anymore)
 	// Sample Response (it doesn't include soft deleted schemas):
 	//  [{"subject": "test2", "version": 5, "id": 100004, "schema": "{\"type\":\"record\",...}]}"},
 	//   {"subject": "test2", "version": 6, "id": 100006, "schema": "{\"type\":\"record\",...}]}"}]
+	// TODO: filter by subject name
 	schemas, _, err := c.apiClient.SchemasV1Api.GetSchemas(c.apiContext(ctx)).Execute()
 	if err != nil {
-		return nil, fmt.Errorf("error reading Schema %q: %s", d.Id(), createDescriptiveError(err))
+		return nil, false, fmt.Errorf("error loading Schemas: %s", createDescriptiveError(err))
 	}
 	schemasJson, err := json.Marshal(schemas)
 	if err != nil {
-		return nil, fmt.Errorf("error reading Schema %q: error marshaling %#v to json: %s", d.Id(), schemas, createDescriptiveError(err))
+		return nil, false, fmt.Errorf("error marshaling %#v to json: %s", schemas, createDescriptiveError(err))
 	}
 	tflog.Debug(ctx, fmt.Sprintf("Fetched Schemas %q: %s", d.Id(), schemasJson), map[string]interface{}{schemaLoggingKey: d.Id()})
 	srSchema, exists := findSchemaById(schemas, schemaIdentifier, subjectName)
+	return &srSchema, exists, nil
+}
+
+func readSchemaRegistryConfigAndSetAttributes(ctx context.Context, d *schema.ResourceData, c *SchemaRegistryRestClient, subjectName string, schemaIdentifier string) ([]*schema.ResourceData, error) {
+	isLatestSchemaBool := isLatestSchema(schemaIdentifier)
+	srSchema, exists, err := loadSchema(ctx, d, c, subjectName, schemaIdentifier)
+	if err != nil {
+		return nil, fmt.Errorf("error reading Schema %q: %s", d.Id(), createDescriptiveError(err))
+	}
 	if !exists {
 		if !d.IsNewResource() {
 			tflog.Warn(ctx, fmt.Sprintf("Removing Schema %q in TF state because Schema could not be found on the server", d.Id()), map[string]interface{}{schemaLoggingKey: d.Id()})
@@ -378,9 +536,6 @@ func readSchemaRegistryConfigAndSetAttributes(ctx context.Context, d *schema.Res
 	tflog.Debug(ctx, fmt.Sprintf("Fetched Schema %q: %s", d.Id(), schemaJson), map[string]interface{}{schemaLoggingKey: d.Id()})
 
 	if err := d.Set(paramSubjectName, srSchema.GetSubject()); err != nil {
-		return nil, err
-	}
-	if err := d.Set(paramSchema, srSchema.GetSchema()); err != nil {
 		return nil, err
 	}
 	// The schema format: AVRO is the default (if no schema type is shown on the response, the type is AVRO), PROTOBUF, JSONSCHEMA
@@ -412,15 +567,29 @@ func readSchemaRegistryConfigAndSetAttributes(ctx context.Context, d *schema.Res
 		}
 	}
 
-	d.SetId(createSchemaId(c.clusterId, srSchema.GetSubject(), srSchema.GetId()))
+	// Explicitly set paramHardDelete to the default value if unset
+	if _, ok := d.GetOk(paramHardDelete); !ok {
+		if err := d.Set(paramHardDelete, paramHardDeleteDefaultValue); err != nil {
+			return nil, createDescriptiveError(err)
+		}
+	}
+
+	// Explicitly set paramRecreateOnUpdate to the default value if unset
+	if _, ok := d.GetOk(paramRecreateOnUpdate); !ok {
+		if err := d.Set(paramRecreateOnUpdate, !isLatestSchemaBool); err != nil {
+			return nil, createDescriptiveError(err)
+		}
+	}
+
+	d.SetId(createSchemaId(c.clusterId, srSchema.GetSubject(), srSchema.GetId(), d.Get(paramRecreateOnUpdate).(bool)))
 
 	return []*schema.ResourceData{d}, nil
 }
 
-func findSchemaById(schemas []sr.Schema, schemaIdentifier int32, subjectName string) (sr.Schema, bool) {
+func findSchemaById(schemas []sr.Schema, schemaIdentifier string, subjectName string) (sr.Schema, bool) {
 	// 'schema' collides with a package name
 	for _, srSchema := range schemas {
-		if srSchema.GetId() == schemaIdentifier && srSchema.GetSubject() == subjectName {
+		if strconv.Itoa(int(srSchema.GetId())) == schemaIdentifier && srSchema.GetSubject() == subjectName {
 			return srSchema, true
 		}
 	}
@@ -428,11 +597,29 @@ func findSchemaById(schemas []sr.Schema, schemaIdentifier int32, subjectName str
 }
 
 func executeSchemaValidate(ctx context.Context, c *SchemaRegistryRestClient, requestData *sr.RegisterSchemaRequest, subjectName string) (sr.CompatibilityCheckResponse, *http.Response, error) {
-	return c.apiClient.CompatibilityV1Api.TestCompatibilityForSubject(c.apiContext(ctx), subjectName).RegisterSchemaRequest(*requestData).Execute()
+	return c.apiClient.CompatibilityV1Api.TestCompatibilityForSubject(c.apiContext(ctx), subjectName).RegisterSchemaRequest(*requestData).Verbose(true).Execute()
+}
+
+func executeSchemaLookup(ctx context.Context, c *SchemaRegistryRestClient, requestData *sr.RegisterSchemaRequest, subjectName string) (sr.Schema, *http.Response, error) {
+	return c.apiClient.SubjectsV1Api.LookUpSchemaUnderSubject(c.apiContext(ctx), subjectName).RegisterSchemaRequest(*requestData).Normalize(true).Execute()
 }
 
 func executeSchemaCreate(ctx context.Context, c *SchemaRegistryRestClient, requestData *sr.RegisterSchemaRequest, subjectName string) (sr.RegisterSchemaResponse, *http.Response, error) {
 	return c.apiClient.SubjectVersionsV1Api.Register(c.apiContext(ctx), subjectName).RegisterSchemaRequest(*requestData).Execute()
+}
+
+func executeSchemaDelete(ctx context.Context, c *SchemaRegistryRestClient, subjectName, schemaVersion string, isHardDelete bool) error {
+	_, _, err := c.apiClient.SubjectVersionsV1Api.DeleteSchemaVersion(c.apiContext(ctx), subjectName, schemaVersion).Permanent(isHardDelete).Execute()
+	if err != nil {
+		if isHardDelete {
+			return fmt.Errorf("error hard deleting Schema: %s", createDescriptiveError(err))
+		} else {
+			return fmt.Errorf("error soft deleting Schema: %s", createDescriptiveError(err))
+		}
+	} else {
+		time.Sleep(schemaRegistryAPIWaitAfterCreateOrDelete)
+		return nil
+	}
 }
 
 func buildSchemaReferences(tfReferences []interface{}) []sr.SchemaReference {

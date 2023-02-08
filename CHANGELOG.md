@@ -1,3 +1,36 @@
+## 1.29.0 (February 8, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.28.0...v1.29.0)
+
+**New updates for resources that are in [Early Access / Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy):**
+* **Breaking changes:** Updated `confluent_schema`: Added checks for semantic (rather than syntactic) equivalence of schemas to avoid occasional Terraform drift during schema updates ([#181](https://github.com/confluentinc/terraform-provider-confluent/issues/181)). You should reimport your existing instances of `confluent_schema` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema).
+
+## 1.28.0 (January 30, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.27.0...v1.28.0)
+
+**New features:**
+* Added new optional `dns_config` block to `confluent_network` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_network) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_network) in a [Generally Available lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
+
+## 1.27.0 (January 30, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.26.0...v1.27.0)
+
+**New updates for resources that are in [Early Access / Open Preview lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy):**
+* **Breaking changes:** Updated `confluent_schema`: The `recreate_on_update` and `hard_delete` attributes were added. You should reimport your existing instances of `confluent_schema` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_schema) ([#176](https://github.com/confluentinc/terraform-provider-confluent/issues/176), [#179](https://github.com/confluentinc/terraform-provider-confluent/issues/179)).
+
+## 1.26.0 (January 27, 2023)
+
+[Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.25.0...v1.26.0)
+
+**New features:**
+* Added support for updating the `partitions_count` attribute for `confluent_kafka_topic` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_topic).
+* Added **1** new example for `confluent_connector` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_connector):
+  * [sql-server-cdc-debezium-source-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/sql-server-cdc-debezium-source-connector)
+
+**Bug fixes:**
+* Fixed a typo in docs for `confluent_kafka_client_quota` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_kafka_client_quota): `"<default>"` (and not `"default"`) should be used represent the default quota.
+
 ## 1.25.0 (January 19, 2023)
 
 [Full Changelog](https://github.com/confluentinc/terraform-provider-confluent/compare/v1.24.0...v1.25.0)
@@ -5,13 +38,13 @@
 **New features:**
 * Added new optional `dns_config` block to `confluent_network` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_network) and a corresponding [data source](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/data-sources/confluent_network) in an [Early Access lifecycle stage](https://docs.confluent.io/cloud/current/api.html#section/Versioning/API-Lifecycle-Policy).
 * Added **7** new examples for `confluent_connector` [resource](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs/resources/confluent_connector):
-  * [s3-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/s3-sink-connector)
-  * [snowflake-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/snowflake-sink-connector)
-  * [elasticsearch-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/elasticsearch-sink-connector)
-  * [dynamo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dynamo-db-sink-connector)
-  * [mongo-db-source-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/mongo-db-source-connector)
-  * [mongo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/mongo-db-sink-connector)
-  * [dynamo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/dynamo-db-sink-connector)
+  * [s3-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/s3-sink-connector)
+  * [snowflake-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/snowflake-sink-connector)
+  * [elasticsearch-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/elasticsearch-sink-connector)
+  * [dynamo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/dynamo-db-sink-connector)
+  * [mongo-db-source-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/mongo-db-source-connector)
+  * [mongo-db-sink-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/mongo-db-sink-connector)
+  * [postgre-sql-cdc-debezium-source-connector](https://github.com/confluentinc/terraform-provider-confluent/tree/master/examples/configurations/connectors/postgre-sql-cdc-debezium-source-connector)
 
 **Bug fixes:**
 * Added support for `zones` attribute for `confluent_network` of type `PEERING`.

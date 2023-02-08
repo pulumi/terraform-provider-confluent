@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.25.0"
+      version = "1.29.0"
     }
   }
 }
@@ -20,8 +20,8 @@ resource "confluent_environment" "staging" {
 # but you should to place both in the same cloud and region to restrict the fault isolation boundary.
 data "confluent_schema_registry_region" "essentials" {
   cloud   = "AWS"
-  region  = "us-east-2"
-  package = "ESSENTIALS"
+  region  = "us-east-1"
+  package = "ADVANCED"
 }
 
 resource "confluent_schema_registry_cluster" "essentials" {
@@ -43,7 +43,7 @@ resource "confluent_kafka_cluster" "basic" {
   display_name = "inventory"
   availability = "SINGLE_ZONE"
   cloud        = "AWS"
-  region       = "us-east-2"
+  region       = "us-east-1"
   basic {}
   environment {
     id = confluent_environment.staging.id
@@ -220,7 +220,7 @@ resource "confluent_kafka_acl" "app-consumer-read-on-group" {
 
 resource "confluent_service_account" "app-connector" {
   display_name = "app-connector"
-  description  = "Service account of elasticsearch Sink Connector to consume from 'orders' topic of 'inventory' Kafka cluster"
+  description  = "Service account of mongo db Sink Connector to consume from 'orders' topic of 'inventory' Kafka cluster"
 }
 
 
@@ -386,7 +386,7 @@ resource "confluent_kafka_acl" "app-connector-read-on-connect-lcc-group" {
   }
 }
 
-resource "confluent_connector" "elasticsearch-db-sink" {
+resource "confluent_connector" "mongo-db-sink" {
   environment {
     id = confluent_environment.staging.id
   }
@@ -395,25 +395,27 @@ resource "confluent_connector" "elasticsearch-db-sink" {
   }
 
   // Block for custom *sensitive* configuration properties that are labelled with "Type: password" under "Configuration Properties" section in the docs:
-  // https://docs.confluent.io/cloud/current/connectors/cc-elasticsearch-service-sink.html#configuration-properties
+  // https://docs.confluent.io/cloud/current/connectors/cc-mongo-db-sink.html#configuration-properties
   config_sensitive = {
-    "connection.password" = "***REDACTED***"
+    "connection.password" = "***REDACTED***",
   }
 
   // Block for custom *nonsensitive* configuration properties that are *not* labelled with "Type: password" under "Configuration Properties" section in the docs:
-  // https://docs.confluent.io/cloud/current/connectors/cc-elasticsearch-service-sink.html#configuration-properties
+  // https://docs.confluent.io/cloud/current/connectors/cc-mongo-db-sink.html#configuration-properties
   config_nonsensitive = {
-    "connector.class"          = "ElasticsearchSink"
-    "name"                     = "elasticsearch-connector"
+    "connector.class"          = "MongoDbAtlasSink"
+    "name"                     = "confluent-mongodb-sink"
     "kafka.auth.mode"          = "SERVICE_ACCOUNT"
     "kafka.service.account.id" = confluent_service_account.app-connector.id
-    "topics"                   = confluent_kafka_topic.orders.topic_name
-    "connection.url"           = "https://ec5bfac80bc14c26a77eefb6585f196c.us-west-2.aws.found.io:9243"
-    "connection.username"      = "confluentuser"
+    "connection.host"          = "cluster0.qb6ewqr.mongodb.net"
+    "connection.user"          = "confluentuser"
     "input.data.format"        = "JSON"
-    "type.name"                = "<type-name>"
-    "key.ignore"               = "true"
-    "schema.ignore"            = "true"
+    "topics"                   = confluent_kafka_topic.orders.topic_name
+    "max.num.retries"          = "3"
+    "retries.defer.timeout"    = "5000"
+    "max.batch.size"           = "0"
+    "database"                 = "Stocks"
+    "collection"               = "StockDetails"
     "tasks.max"                = "1"
   }
 

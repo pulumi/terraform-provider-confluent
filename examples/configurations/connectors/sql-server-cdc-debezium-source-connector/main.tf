@@ -2,7 +2,7 @@ terraform {
   required_providers {
     confluent = {
       source  = "confluentinc/confluent"
-      version = "1.29.0"
+      version = "1.24.0"
     }
   }
 }
@@ -20,8 +20,8 @@ resource "confluent_environment" "staging" {
 # but you should to place both in the same cloud and region to restrict the fault isolation boundary.
 data "confluent_schema_registry_region" "essentials" {
   cloud   = "AWS"
-  region  = "us-east-2"
-  package = "ESSENTIALS"
+  region  = "us-east-1"
+  package = "ADVANCED"
 }
 
 resource "confluent_schema_registry_cluster" "essentials" {
@@ -43,10 +43,22 @@ resource "confluent_kafka_cluster" "basic" {
   display_name = "inventory"
   availability = "SINGLE_ZONE"
   cloud        = "AWS"
-  region       = "us-east-2"
+  region       = "us-east-1"
   basic {}
   environment {
     id = confluent_environment.staging.id
+  }
+}
+
+resource "confluent_kafka_topic" "orders" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+  topic_name    = "orders"
+  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
+  credentials {
+    key    = confluent_api_key.app-manager-kafka-api-key.id
+    secret = confluent_api_key.app-manager-kafka-api-key.secret
   }
 }
 
@@ -94,21 +106,14 @@ resource "confluent_api_key" "app-manager-kafka-api-key" {
   ]
 }
 
-resource "confluent_kafka_topic" "orders" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  topic_name    = "orders"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
-  }
-}
-
 resource "confluent_service_account" "app-consumer" {
   display_name = "app-consumer"
   description  = "Service account to consume from 'orders' topic of 'inventory' Kafka cluster"
+}
+
+resource "confluent_service_account" "app-connector" {
+  display_name = "app-connector"
+  description  = "Service account of sql server Source Connector to consume from 'orders' topic of 'inventory' Kafka cluster"
 }
 
 resource "confluent_api_key" "app-consumer-kafka-api-key" {
@@ -128,24 +133,6 @@ resource "confluent_api_key" "app-consumer-kafka-api-key" {
     environment {
       id = confluent_environment.staging.id
     }
-  }
-}
-
-resource "confluent_kafka_acl" "app-producer-write-on-topic" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.basic.id
-  }
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.orders.topic_name
-  pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.app-producer.id}"
-  host          = "*"
-  operation     = "WRITE"
-  permission    = "ALLOW"
-  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
-  credentials {
-    key    = confluent_api_key.app-manager-kafka-api-key.id
-    secret = confluent_api_key.app-manager-kafka-api-key.secret
   }
 }
 
@@ -174,20 +161,17 @@ resource "confluent_api_key" "app-producer-kafka-api-key" {
   }
 }
 
-// Note that in order to consume from a topic, the principal of the consumer ('app-consumer' service account)
-// needs to be authorized to perform 'READ' operation on both Topic and Group resources:
-// confluent_kafka_acl.app-consumer-read-on-topic, confluent_kafka_acl.app-consumer-read-on-group.
-// https://docs.confluent.io/platform/current/kafka/authorization.html#using-acls
-resource "confluent_kafka_acl" "app-consumer-read-on-topic" {
+
+resource "confluent_kafka_acl" "app-connector-describe-on-cluster" {
   kafka_cluster {
     id = confluent_kafka_cluster.basic.id
   }
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.orders.topic_name
+  resource_type = "CLUSTER"
+  resource_name = "kafka-cluster"
   pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.app-consumer.id}"
+  principal     = "User:${confluent_service_account.app-connector.id}"
   host          = "*"
-  operation     = "READ"
+  operation     = "DESCRIBE"
   permission    = "ALLOW"
   rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
   credentials {
@@ -196,24 +180,80 @@ resource "confluent_kafka_acl" "app-consumer-read-on-topic" {
   }
 }
 
-resource "confluent_kafka_acl" "app-consumer-read-on-group" {
+resource "confluent_kafka_acl" "app-connector-write-on-prefix-topics" {
   kafka_cluster {
     id = confluent_kafka_cluster.basic.id
   }
-  resource_type = "GROUP"
-  // The existing values of resource_name, pattern_type attributes are set up to match Confluent CLI's default consumer group ID ("confluent_cli_consumer_<uuid>").
-  // https://docs.confluent.io/confluent-cli/current/command-reference/kafka/topic/confluent_kafka_topic_consume.html
-  // Update the values of resource_name, pattern_type attributes to match your target consumer group ID.
-  // https://docs.confluent.io/platform/current/kafka/authorization.html#prefixed-acls
-  resource_name = "confluent_cli_consumer_"
+  resource_type = "TOPIC"
+  resource_name = local.database_server_name
   pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.app-consumer.id}"
+  principal     = "User:${confluent_service_account.app-connector.id}"
   host          = "*"
-  operation     = "READ"
+  operation     = "WRITE"
   permission    = "ALLOW"
   rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
   credentials {
     key    = confluent_api_key.app-manager-kafka-api-key.id
     secret = confluent_api_key.app-manager-kafka-api-key.secret
   }
+}
+
+resource "confluent_kafka_acl" "app-connector-create-on-prefix-topics" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+  resource_type = "TOPIC"
+  resource_name = local.database_server_name
+  pattern_type  = "PREFIXED"
+  principal     = "User:${confluent_service_account.app-connector.id}"
+  host          = "*"
+  operation     = "CREATE"
+  permission    = "ALLOW"
+  rest_endpoint = confluent_kafka_cluster.basic.rest_endpoint
+  credentials {
+    key    = confluent_api_key.app-manager-kafka-api-key.id
+    secret = confluent_api_key.app-manager-kafka-api-key.secret
+  }
+}
+
+resource "confluent_connector" "sql-server-cdc-source" {
+  environment {
+    id = confluent_environment.staging.id
+  }
+  kafka_cluster {
+    id = confluent_kafka_cluster.basic.id
+  }
+
+  // Block for custom *sensitive* configuration properties that are labelled with "Type: password" under "Configuration Properties" section in the docs:
+  // https://docs.confluent.io/cloud/current/connectors/cc-microsoft-sql-server-source-cdc-debezium.html#configuration-properties
+  config_sensitive = {
+    "database.password" = "***REDACTED***"
+  }
+
+  // Block for custom *nonsensitive* configuration properties that are *not* labelled with "Type: password" under "Configuration Properties" section in the docs:
+  // https://docs.confluent.io/cloud/current/connectors/cc-microsoft-sql-server-source-cdc-debezium.html#configuration-properties
+  config_nonsensitive = {
+    "connector.class"          = "SqlServerCdcSource"
+    "name"                     = "SqlServerCdcSourceConnector_0"
+    "kafka.auth.mode"          = "SERVICE_ACCOUNT"
+    "kafka.service.account.id" = confluent_service_account.app-connector.id
+    "database.hostname"        = "asdfasd.database.windows.net"
+    "database.port"            = "1433"
+    "database.user"            = "confluentuser"
+    "database.dbname"          = "orders"
+    "database.server.name"     = local.database_server_name
+    "snapshot.mode"            = "initial"
+    "output.data.format"       = "JSON"
+    "tasks.max"                = "1"
+  }
+
+  depends_on = [
+    confluent_kafka_acl.app-connector-describe-on-cluster,
+    confluent_kafka_acl.app-connector-write-on-prefix-topics,
+    confluent_kafka_acl.app-connector-create-on-prefix-topics,
+  ]
+}
+
+locals {
+  database_server_name = "sql"
 }
